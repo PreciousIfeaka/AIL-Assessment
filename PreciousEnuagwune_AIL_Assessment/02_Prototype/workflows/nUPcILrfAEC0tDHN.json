@@ -1,0 +1,92 @@
+{
+  "updatedAt": "2026-10-11T08:01:02.262Z",
+  "createdAt": "2026-10-09T16:53:22.526Z",
+  "id": "nUPcILrfAEC0tDHN",
+  "name": "SW-Config",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "return { json: {\n  threshold: 0.6, max_attempts: 3,\n  sla_minutes: 30, state_ttl_min: 30,\n  hours: { days: ['Mon','Tue','Wed','Thu','Fri','Sat'], open: 8, close: 20 },\n  max_qty: 10,\n  zones: [  // ASSUMPTION: fictional fees\n    { label: 'Lagos', match: ['lagos'], fee: 3500 },\n    { label: 'Abuja', match: ['abuja'], fee: 5500 },\n    { label: 'Port Harcourt', match: ['port harcourt', 'ph'], fee: 5500 }\n  ],\n  routing: { new_order:'sales', payment_verification:'sales', complaint_refund:'manager',\n             delivery_issue:'dispatch', low_confidence:'sales', human_request:'sales',\n             media_received:'sales', intake_stuck:'sales', unknown:'sales' },\n  staff: { sales:{name:'Amaka', chat_id:'-1003945075854'}, dispatch:{name:'Tunde', chat_id:'-1003945075854'},\n           manager:{name:'Zuri Manager', chat_id:'-1003945075854'} },\n  intents: {   // keyword: weight. Bare 'order' is deliberately NOT in place_order.\n    product_enquiry: { price:1, 'how much':1, cost:.8, available:.7, stock:.7, catalogue:.8, 'do you have':.8 },\n    order_status:    { status:.8, tracking:1, track:.8, 'where is':.7, 'my order':.8 },\n    place_order:     { buy:1, purchase:1, 'place an order':1, 'i want to order':1, 'want to get':.8, cart:.7 },\n    delivery_info:   { delivery:1, shipping:1, 'how long':.7, dispatch:.8, areas:.6 },\n    payment_info:    { pay:.8, account:.6, transfer:.8, bank:.8, paid:.8, receipt:1 },\n    complaint_refund:{ refund:1, broken:1, shattered:1, wrong:.6, complain:1, terrible:.8 }\n  },\n  messages: { /* menu, delivery_info, payment_info, ack_in_hours, ack_after_hours, ... */\n\n    order_ask_item: 'Sure, I can help you place an order. What would you like to buy? Send the product name.',\n    menu: 'Sorry, I did not catch that. Reply with a number:\\n1. Prices and availability\\n2. Order status\\n3. Place an order\\n4. Delivery info\\n5. Payment info\\n6. Speak to a person',\n    catalogue_header: 'Here is what we currently have in stock:',\n  catalogue_footer: 'Send a product name for details, or say place an order to buy.',\n    status_text: {\n  awaiting_payment: 'Your order is awaiting payment. Please send your transfer proof with the order ID.',\n  paid_confirmed:   'Payment confirmed. We are preparing your order.',\n  processing:       'Your order is being prepared for dispatch.',\n  dispatched:       'Your order is on its way.',\n  delivered:        'Your order has been delivered.',\n  cancelled:        'This order was cancelled.'\n},\norder_status_prompt:     'Please send your order ID (it looks like ZH-12345).',\norder_status_bad_format: 'That does not look like an order ID. Order IDs look like ZH-12345.',\norder_status_no_match:   'I could not match that order to this number. Check the ID, or reply AGENT to speak to a person.',\n    delivery: 'Delivery timelines: Lagos 1-2 working days; Abuja and Port Harcourt 3-5 working days. Orders confirmed before 2pm are dispatched the same day. We operate 8am-8pm, Monday to Saturday.',   // ASSUMPTION: fictional timelines\n    payment_info: 'Pay by bank transfer to:\\nBank: Demo Bank\\nAccount name: Zuri Home & Style Ltd\\nAccount number: 0000000000\\n\\nAfter paying, send your transfer receipt with your order ID (for example ZH-12345) and our team will confirm it.',   // ASSUMPTION: fictional account details\n    payment_ask_id: 'Thanks. Please send your order ID (it looks like ZH-12345) so we can match your payment.',\n  },\n  interrupts: {   // plain words or phrases, lowercase, no regex characters\n  human_request: ['agent', 'human', 'representative', 'real person', 'a person',\n                  'talk to', 'speak to', 'customer care', 'customer service', 'call me'],\n  complaint:     ['refund', 'money back', 'broken', 'shattered', 'damaged',\n                  'scam', 'fraud', 'complain', 'not delivered', 'wrong item'],\n  cancel:        ['cancel', 'stop', 'start over', 'restart', 'never mind']\n},\n}};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        -16
+      ],
+      "id": "acbea77c-f7a3-48d7-b096-a156ca17a572",
+      "name": "Get Company Config Data"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "86919fb1-f736-4e22-bbf3-c281351cbd4d",
+      "typeVersion": 1.1,
+      "name": "Triggered from Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -48,
+        -16
+      ]
+    }
+  ],
+  "connections": {
+    "Triggered from Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get Company Config Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "vnHyAj8nrGAWn4Kw",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "ec17b124-6a28-4afb-b100-01c5b0e36965",
+  "activeVersionId": "ec17b124-6a28-4afb-b100-01c5b0e36965",
+  "versionCounter": 28,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-11T17:26:58.342Z",
+      "createdAt": "2026-10-11T17:26:58.342Z",
+      "role": "workflow:owner",
+      "workflowId": "nUPcILrfAEC0tDHN",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version e1091aa0",
+    "description": ""
+  }
+}

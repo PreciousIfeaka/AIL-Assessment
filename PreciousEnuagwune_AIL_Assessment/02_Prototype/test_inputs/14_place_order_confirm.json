@@ -1,0 +1,39 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "101234567890123",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "2348099999999",
+              "phone_number_id": "109876543210987"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Chidi Demo"
+                },
+                "wa_id": "2348055556666"
+              }
+            ],
+            "messages": [
+              {
+                "from": "2348055556666",
+                "id": "wamid.TEST.ORDER_06",
+                "timestamp": "1728000000",
+                "type": "text",
+                "text": {
+                  "body": "YES"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

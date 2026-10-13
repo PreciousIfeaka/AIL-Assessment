@@ -1,0 +1,381 @@
+{
+  "updatedAt": "2026-10-11T22:28:06.508Z",
+  "createdAt": "2026-10-10T18:14:04.311Z",
+  "id": "GAbqwoB9OtjszATP",
+  "name": "SLA Watchdog",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        -32
+      ],
+      "id": "94cf9c71-ff7d-4825-8b58-c13e8e215c52",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "nUPcILrfAEC0tDHN",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/nUPcILrfAEC0tDHN",
+          "cachedResultName": "SW-Config"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        224,
+        -32
+      ],
+      "id": "94094580-d3bf-424f-8e1a-fd24ad7d9fae",
+      "name": "Load Config"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b74c455a-363d-43eb-bb0b-83792fcb75b9",
+              "leftValue": "={{ $json.in_hours }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        -32
+      ],
+      "id": "2e5c7523-4d16-4945-b06d-c52435fb48ab",
+      "name": "In Hours?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Load Config').first().json;\nconst rows = $input.all().map(i => i.json).filter(r => r.id !== undefined && r.id !== null);\n\nconst mins = m => m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;\nconst wat  = iso => new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit' });\nconst manager = cfg.staff.manager;\n\nconst out = [];\nfor (const r of rows) {\n  const level = Number(r.reminder_count) + 1;\n\n  // Level 1: the assignee. Level 2 and above: the assignee and the manager.\n  const recipients = [{ key: r.assigned_to, chat_id: cfg.staff[r.assigned_to]?.chat_id || manager.chat_id }];\n  if (level >= 2 && r.assigned_to !== 'manager') recipients.push({ key: 'manager', chat_id: manager.chat_id });\n\n  const text = [\n    `SLA REMINDER ${level} of ${cfg.max_reminders}`,\n    `Case #${r.id} (${r.category}), priority ${r.priority}`,\n    `Assigned to: ${r.assigned_to}`,\n    `Open for ${mins(Number(r.age_min))}. SLA was due at ${wat(r.sla_due_at)} WAT.`,\n    'Please claim it in Staff-Actions.'\n  ].join('\\n');\n\n  for (const rc of recipients) {\n    out.push({ json: { escalation_id: r.id, category: r.category, level, new_count: level,\n                       age_min: r.age_min, to: rc.key, chat_id: rc.chat_id, text } });\n  }\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        -64
+      ],
+      "id": "6cc57303-8499-4e06-a29a-62688b84d79d",
+      "name": "Build Reminder"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Load Config').first().json;\nconst p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', weekday: 'short',\n  hour: '2-digit', hour12: false }).formatToParts(new Date());\nconst get = t => p.find(x => x.type === t).value;\nconst hour = Number(get('hour')) % 24;\nconst open = cfg.hours.days.includes(get('weekday')) && hour >= cfg.hours.open && hour < cfg.hours.close;\nreturn [{ json: { in_hours: open } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -32
+      ],
+      "id": "5bfbc851-0e48-4aef-993c-ac3ba37d73bb",
+      "name": "Business Hours"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, category, priority, assigned_to, created_at, sla_due_at, reminder_count,\n       (EXTRACT(EPOCH FROM (now() - created_at)) / 60)::int AS age_min\nFROM escalations\nWHERE status = 'open'\n  AND sla_due_at < now()\n  AND reminder_count = 0\nORDER BY sla_due_at\nLIMIT 20;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        944,
+        -64
+      ],
+      "id": "3923cc24-adbc-4568-a85d-7073b0d65f21",
+      "name": "Find Overdue1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE escalations\nSET reminder_count = 1, last_reminded_at = now()\nWHERE id = {{ Number($('Build Reminder').item.json.escalation_id) }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1776,
+        -144
+      ],
+      "id": "eaf69bbe-c15e-4294-9f36-75ccdada19e8",
+      "name": "Update Case",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, event, detail)\nVALUES (\n  'esc-{{ $('Build Reminder').item.json.escalation_id }}',\n  'sla_reminder',\n  'escalation={{ $('Build Reminder').item.json.escalation_id }}; category={{ $('Build Reminder').item.json.category }}; to=manager; age_min={{ $('Build Reminder').item.json.age_min }}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2032,
+        -128
+      ],
+      "id": "4cb361d2-fec5-4fb8-81e5-ddb15f800917",
+      "name": "Audit SLA Reminder",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, event, detail)\nVALUES (\n  'esc-{{ $('Build Reminder').item.json.escalation_id }}',\n  'notify_failed',\n  'escalation={{ $('Build Reminder').item.json.escalation_id }}; channel=telegram; reason=sla_reminder_not_delivered'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1792,
+        64
+      ],
+      "id": "af3cea55-f1e0-43d8-b128-b61bf0b164b2",
+      "name": "Execute a SQL query",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1456,
+        -64
+      ],
+      "id": "31adb889-7784-4da6-93a6-349ace5f1816",
+      "name": "Audit Notify Failed",
+      "webhookId": "310d5408-5ef4-4493-878f-5db362382db8",
+      "retryOnFail": true,
+      "credentials": {
+        "telegramApi": {
+          "id": "Z9EjkgGDgY4glGYa",
+          "name": "Telegram account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Business Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "In Hours?": {
+      "main": [
+        [
+          {
+            "node": "Find Overdue1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Reminder": {
+      "main": [
+        [
+          {
+            "node": "Audit Notify Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Business Hours": {
+      "main": [
+        [
+          {
+            "node": "In Hours?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Overdue1": {
+      "main": [
+        [
+          {
+            "node": "Build Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Case": {
+      "main": [
+        [
+          {
+            "node": "Audit SLA Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Notify Failed": {
+      "main": [
+        [
+          {
+            "node": "Update Case",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "vnHyAj8nrGAWn4Kw",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "34e86978-a5be-46bb-842c-d53210df26c1",
+  "activeVersionId": "34e86978-a5be-46bb-842c-d53210df26c1",
+  "versionCounter": 126,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-11T17:26:58.342Z",
+      "createdAt": "2026-10-11T17:26:58.342Z",
+      "role": "workflow:owner",
+      "workflowId": "GAbqwoB9OtjszATP",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version 34e86978",
+    "description": ""
+  }
+}

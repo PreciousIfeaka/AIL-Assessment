@@ -1,0 +1,155 @@
+{
+  "updatedAt": "2026-10-12T08:46:05.678Z",
+  "createdAt": "2026-10-12T08:18:05.232Z",
+  "id": "FxNXc7UzHpPRIEnb",
+  "name": "Test-Send (One Message per Time)",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "8a918597-ae8b-41af-ba75-52cae6bb0707",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ba1c1b3e-38e5-4458-b777-1bcc9c370dc8",
+              "name": "phone",
+              "value": "2348055556666",
+              "type": "string"
+            },
+            {
+              "id": "a2cb9e14-73ed-4f9c-b4ee-ffd7163c1157",
+              "name": "text",
+              "value": "I want a refund",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "5038c189-191c-4a8d-adce-625396e40e1a",
+      "name": "Message to Send"
+    },
+    {
+      "parameters": {
+        "jsCode": "const m = $input.first().json;               // { phone, text } from \"Message to send\"\n\nconst phone = String(m.phone).trim();\nconst text  = String(m.text ?? '').trim();\n\n// A new ID every run. Reusing an ID makes the system ignore the message as a duplicate.\nconst waId = 'wamid.TEST.' + Date.now();\n\nconst payload = {\n  object: 'whatsapp_business_account',\n  entry: [{\n    id: '101234567890123',\n    changes: [{\n      field: 'messages',\n      value: {\n        messaging_product: 'whatsapp',\n        metadata: { display_phone_number: '2348099999999', phone_number_id: '109876543210987' },\n        contacts: [{ profile: { name: 'Test User' }, wa_id: phone }],\n        messages: [{\n          from: phone,\n          id: waId,\n          timestamp: String(Math.floor(Date.now() / 1000)),\n          type: 'text',\n          text: { body: text }\n        }]\n      }\n    }]\n  }]\n};\n\nreturn [{ json: { payload } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "ab32ce14-9ad1-4cd6-982a-75a7e2887829",
+      "name": "Build Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zuri.prexx.online/webhook/900e6470-4e45-4b07-a686-2fff9ef8d8ee/whatsapp",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        0
+      ],
+      "id": "579e0dc4-223e-4318-8dcd-b4ce78eb6e7d",
+      "name": "Send"
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Message to Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message to Send": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "40f1acf0-5a64-459d-bd73-a83852da0b8b",
+  "activeVersionId": null,
+  "versionCounter": 20,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-12T08:18:05.232Z",
+      "createdAt": "2026-10-12T08:18:05.232Z",
+      "role": "workflow:owner",
+      "workflowId": "FxNXc7UzHpPRIEnb",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}

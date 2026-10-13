@@ -1,0 +1,190 @@
+{
+  "updatedAt": "2026-10-12T07:18:15.303Z",
+  "createdAt": "2026-10-09T16:46:35.056Z",
+  "id": "SIsWDKWUXRdWMnjs",
+  "name": "SW-Reply",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phone_hash"
+            },
+            {
+              "name": "wa_phone"
+            },
+            {
+              "name": "request_id"
+            },
+            {
+              "name": "text"
+            },
+            {
+              "name": "handled_by"
+            },
+            {
+              "name": "phone_masked"
+            }
+          ]
+        }
+      },
+      "id": "c055762a-8fe7-4141-a639-df2372f30060",
+      "typeVersion": 1.1,
+      "name": "Triggered from Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        272,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO outbox (phone_hash, request_id, text, channel, mode, status, sent_at)\nVALUES (\n  '{{ $json.phone_hash }}',\n  '{{ String($json.request_id).replace(/'/g, \"''\") }}',\n  '{{ String($json.text ?? \"\").replace(/\\0/g, \"\").replace(/'/g, \"''\") }}',\n  'whatsapp', 'simulated', 'simulated_sent', now()\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        496,
+        208
+      ],
+      "id": "4cdd8c56-da6a-40be-8ebb-f15bf0aacb6f",
+      "name": "Insert Outbox",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE messages\nSET responded_at = COALESCE(responded_at, now()),\n    handled_by = '{{ $('Triggered from Another Workflow').item.json.handled_by }}'\nWHERE wa_message_id = '{{ String($('Triggered from Another Workflow').item.json.request_id).replace(/'/g, \"''\") }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        720,
+        208
+      ],
+      "id": "6202c352-1e30-471b-9b3c-0635f49253f6",
+      "name": "Mark Responded",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, event, detail)\nVALUES (\n  '{{ String($('Triggered from Another Workflow').item.json.request_id).replace(/'/g, \"''\") }}',\n  'reply_sent',\n  'handled_by={{ $('Triggered from Another Workflow').item.json.handled_by }}; chars={{ String($('Triggered from Another Workflow').item.json.text ?? \"\").length }}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        944,
+        208
+      ],
+      "id": "862bbd7f-5114-47c5-915a-87570ea825b6",
+      "name": "Audit reply_sent",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Triggered from Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Insert Outbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Outbox": {
+      "main": [
+        [
+          {
+            "node": "Mark Responded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Responded": {
+      "main": [
+        [
+          {
+            "node": "Audit reply_sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "vnHyAj8nrGAWn4Kw",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "7d5a6297-3675-40aa-bd0b-433d6623a315",
+  "activeVersionId": "7d5a6297-3675-40aa-bd0b-433d6623a315",
+  "versionCounter": 272,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-11T17:26:58.342Z",
+      "createdAt": "2026-10-11T17:26:58.342Z",
+      "role": "workflow:owner",
+      "workflowId": "SIsWDKWUXRdWMnjs",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version 7d5a6297",
+    "description": ""
+  }
+}

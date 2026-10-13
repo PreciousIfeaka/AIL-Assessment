@@ -1,0 +1,370 @@
+{
+  "updatedAt": "2026-10-12T09:10:43.057Z",
+  "createdAt": "2026-10-10T19:08:30.923Z",
+  "id": "HcEUEMWN9lPNoBg8",
+  "name": "Staff-Actions",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "nUPcILrfAEC0tDHN",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/nUPcILrfAEC0tDHN",
+          "cachedResultName": "SW-Config"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        224,
+        80
+      ],
+      "id": "263163b7-28e4-450d-8803-c531bf8e8183",
+      "name": "Load Config"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg  = $('Load Config').first().json;\nconst body = $('Receive').first().json.body || {};\n\nconst action = String(body.action || '').toLowerCase();\nconst id     = Number(body.id);\nconst staff  = String(body.staff || '').toLowerCase();\n\nconst errors = [];\nif (!['claim', 'resolve'].includes(action)) errors.push('action must be claim or resolve');\nif (!Number.isInteger(id) || id < 1)        errors.push('id must be a positive integer');\nif (!Object.keys(cfg.staff).includes(staff)) errors.push('unknown staff');\n\nreturn [{ json: {\n  action: errors.length ? 'invalid' : action,\n  id, staff, error: errors.join('; ')\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        80
+      ],
+      "id": "be94e1c4-c950-4445-9710-13334f8a6ed4",
+      "name": "Validate"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, error: $json.error } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        896,
+        272
+      ],
+      "id": "537c8aea-d7cc-4a1f-83a7-769b56c698e5",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "claim",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "31429c8a-726e-419a-bd4f-14bcc38e09c1"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "24b2e54d-b4d8-44d2-b1f5-370202a94dfb",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "resolve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        672,
+        64
+      ],
+      "id": "b058322e-778f-4beb-836f-a90334bb9c96",
+      "name": "Route"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ (() => {\n  const v = $('Validate').item.json;\n  const hit = v.action === 'claim' ? $('Claim').item.json.id : $('Resolve').item.json.id;\n  return { ok: !!hit, id: v.id, action: v.action,\n           message: hit ? 'done' : 'not updated: case not found or already ' + (v.action === 'claim' ? 'claimed or resolved' : 'resolved') };\n})() }}",
+        "options": {
+          "responseCode": "={{ ($('Validate').item.json.action === 'claim' ? $('Claim').item.json.id : $('Resolve').item.json.id) ? 200 : 409 }}"
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1344,
+        -16
+      ],
+      "id": "bbba1544-996d-4ba9-8682-c1013471413a",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "b23cd39a-661b-4c63-ad74-0fc695f3bec7/staff/actions",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        80
+      ],
+      "id": "d43cdb92-b857-42a2-966c-c078e2b6ee41",
+      "name": "Receive",
+      "webhookId": "b23cd39a-661b-4c63-ad74-0fc695f3bec7"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE escalations\nSET status = 'claimed', claimed_by = '{{ $json.staff }}', claimed_at = now(),\n    first_response_at = COALESCE(first_response_at, now())\nWHERE id = {{ Number($json.id) }} AND status = 'open'\nRETURNING id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        -112
+      ],
+      "id": "2a7092cb-dda7-4640-ad63-29fb347c7b85",
+      "name": "Claim",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE escalations\nSET status = 'resolved', resolved_at = now(),\n    claimed_by = COALESCE(claimed_by, '{{ $json.staff }}'),\n    first_response_at = COALESCE(first_response_at, now())\nWHERE id = {{ Number($json.id) }} AND status IN ('open','claimed')\nRETURNING id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        80
+      ],
+      "id": "e651cdb5-4057-4c89-bb1a-2da1f9700e05",
+      "name": "Resolve",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, event, detail)\nVALUES (\n  'esc-{{ $('Validate').item.json.id }}',\n  '{{ $json.id ? \"escalation_\" + ($('Validate').item.json.action === \"claim\" ? \"claimed\" : \"resolved\") : \"staff_action_rejected\" }}',\n  'staff={{ $('Validate').item.json.staff }}; action={{ $('Validate').item.json.action }}; result={{ $json.id ? \"ok\" : \"no_change\" }}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        -16
+      ],
+      "id": "685a598a-feff-4c0c-8664-0e550a5cfd0b",
+      "name": "Audit1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Claim",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim": {
+      "main": [
+        [
+          {
+            "node": "Audit1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve": {
+      "main": [
+        [
+          {
+            "node": "Audit1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "vnHyAj8nrGAWn4Kw",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "d4ea4fa0-1b69-4dc2-b669-f5c15614fcc2",
+  "activeVersionId": "d4ea4fa0-1b69-4dc2-b669-f5c15614fcc2",
+  "versionCounter": 84,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-11T17:26:58.342Z",
+      "createdAt": "2026-10-11T17:26:58.342Z",
+      "role": "workflow:owner",
+      "workflowId": "HcEUEMWN9lPNoBg8",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version d4ea4fa0",
+    "description": ""
+  }
+}

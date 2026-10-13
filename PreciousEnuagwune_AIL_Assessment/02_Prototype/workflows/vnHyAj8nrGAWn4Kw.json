@@ -1,0 +1,164 @@
+{
+  "updatedAt": "2026-10-12T08:54:26.094Z",
+  "createdAt": "2026-10-10T13:02:50.751Z",
+  "id": "vnHyAj8nrGAWn4Kw",
+  "name": "Error-Handler",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "bf90ac6c-0da8-4fbe-bc57-721bb55aca82",
+      "name": "Error Trigger",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const e   = $input.first().json;\nconst ex  = e.execution || {};\nconst wf  = e.workflow  || {};\nconst err = ex.error    || {};\n\nconst clip = (s, n) => String(s || '').replace(/\\s+/g, ' ').trim().slice(0, n);\nconst q = v => v === null || v === undefined\n  ? 'NULL'\n  : \"'\" + String(v).replace(/\\0/g, '').replace(/'/g, \"''\") + \"'\";\n\nconst workflow_name = wf.name || 'unknown workflow';\nconst failed_node   = ex.lastNodeExecuted || 'unknown node';\nconst message       = clip(err.message, 300) || 'no message';\nconst execution_id  = String(ex.id || 'unknown');\nconst when = new Date().toLocaleString('en-GB', { timeZone: 'Africa/Lagos' });\n\nconst detail = `workflow=${workflow_name}; node=${failed_node}; error=${message}`;\n\nconst alert_text = [\n  'ERROR in ' + workflow_name,\n  'Node: ' + failed_node,\n  'Message: ' + message,\n  'Time (WAT): ' + when,\n  'Execution: ' + (ex.url || execution_id)\n].join('\\n');\n\nconst sql = `INSERT INTO audit_log (request_id, phone_masked, event, detail)\nVALUES (${q(execution_id)}, NULL, 'workflow_error', ${q(detail)});`;\n\nreturn [{ json: { workflow_name, failed_node, message, execution_id, alert_text, sql } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "0341dd3b-df78-4e81-991c-cae0eaa60e30",
+      "name": "Format"
+    },
+    {
+      "parameters": {
+        "chatId": "-1003945075854",
+        "text": "={{ $('Format').item.json.alert_text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        896,
+        0
+      ],
+      "id": "de50bb24-b449-4cbf-a8ef-5b26bce71a07",
+      "name": "Send a text message",
+      "webhookId": "f8eeb8fd-9ef7-43f4-b895-e5c0099361db",
+      "retryOnFail": true,
+      "credentials": {
+        "telegramApi": {
+          "id": "TNnlptKyEYTurFXE",
+          "name": "Telegram account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        560,
+        0
+      ],
+      "id": "2b1d7fb6-67a4-4b86-b6ab-2c53c782fc67",
+      "name": "Audit Workflow Error",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format": {
+      "main": [
+        [
+          {
+            "node": "Audit Workflow Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [],
+        []
+      ]
+    },
+    "Audit Workflow Error": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "ee22fa1c-015f-44d2-8cfd-7fca02b89a0b",
+  "activeVersionId": "05d57253-0d7e-4785-93a8-11ca3172404f",
+  "versionCounter": 84,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-11T17:26:58.342Z",
+      "createdAt": "2026-10-11T17:26:58.342Z",
+      "role": "workflow:owner",
+      "workflowId": "vnHyAj8nrGAWn4Kw",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}

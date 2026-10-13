@@ -1,0 +1,152 @@
+{
+  "updatedAt": "2026-10-12T09:12:29.286Z",
+  "createdAt": "2026-10-12T08:25:34.510Z",
+  "id": "Ub1TY93IulLaVMzE",
+  "name": "Test-Staff-Action",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "bf7f3529-e5f1-4239-990a-77bbe268e6fd",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "42533bf3-4f7c-41cf-9657-ef5083ab4721",
+              "name": "id",
+              "value": "4",
+              "type": "string"
+            },
+            {
+              "id": "fef9fbdd-7526-4394-9c15-2601fb4bcd04",
+              "name": "action",
+              "value": "claim",
+              "type": "string"
+            },
+            {
+              "id": "9d09c559-a687-451b-bf81-05bf1ae81bd8",
+              "name": "staff",
+              "value": "sales",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "b025192f-ab50-46e1-90f3-74e9263c75b4",
+      "name": "Choose Action"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zuri.prexx.online/webhook/b23cd39a-661b-4c63-ad74-0fc695f3bec7/staff/actions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $json.id, action: $json.action, staff: $json.staff }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        0
+      ],
+      "id": "66579ed6-e09a-4a72-b088-286d96ec3c76",
+      "name": "Send",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "LaJPGmQf9B5RktgR",
+          "name": "Header Auth account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Choose Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Choose Action": {
+      "main": [
+        [
+          {
+            "node": "Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": null,
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "fe33e0c8-247c-4b5e-99c2-6990c5ec979f",
+  "activeVersionId": null,
+  "versionCounter": 43,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-12T08:25:34.510Z",
+      "createdAt": "2026-10-12T08:25:34.510Z",
+      "role": "workflow:owner",
+      "workflowId": "Ub1TY93IulLaVMzE",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}

@@ -1,0 +1,4953 @@
+{
+  "updatedAt": "2026-10-12T17:02:37.888Z",
+  "createdAt": "2026-10-09T13:10:25.493Z",
+  "id": "a4Tfajsf1EzW8xuy",
+  "name": "WA-Inbound",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "900e6470-4e45-4b07-a686-2fff9ef8d8ee/whatsapp",
+        "options": {
+          "rawBody": false,
+          "responseCode": {
+            "values": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        80
+      ],
+      "id": "ce2286ba-13a2-44ff-b01a-92b39d505bfd",
+      "name": "Receive WhatsApp Webhook",
+      "webhookId": "900e6470-4e45-4b07-a686-2fff9ef8d8ee"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nreturn $input.all().map(item => {\n  const phone = item.json.wa_phone;\n\n  const phone_hash = crypto\n    .createHmac('sha256', $env.PHONE_PEPPER)\n    .update(phone)\n    .digest('hex');\n\n  return {\n    json: {\n      ...item.json,\n      phone_hash,\n      phone_masked: phone.slice(0, 5) + '****' + phone.slice(-3)\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -16
+      ],
+      "id": "441ab28f-8d5c-4de5-b347-821225ef003d",
+      "name": "Hash and Mask Phone Number"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "nUPcILrfAEC0tDHN",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/nUPcILrfAEC0tDHN"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1568,
+        -112
+      ],
+      "id": "d295228b-131c-4bf0-a971-e3b298f92bfd",
+      "name": "Extract Data from SW-Config"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $input.first().json;\nconst p = new Intl.DateTimeFormat('en-GB', { timeZone:'Africa/Lagos', weekday:'short',\n  hour:'2-digit', hour12:false }).formatToParts(new Date());\nconst get = t => p.find(x => x.type === t).value;\nconst hour = Number(get('hour')) % 24;\nconst open = cfg.hours.days.includes(get('weekday')) && hour >= cfg.hours.open && hour < cfg.hours.close;\nreturn { json: { ...cfg, after_hours: !open } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        -112
+      ],
+      "id": "34e97cf0-1243-422f-9d95-777d3657b1ec",
+      "name": "Business Hours"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg   = $('Business Hours').first().json;\nconst base  = $('Hash and Mask Phone Number').first().json;      // message context plus after_hours\nconst state = $('Load State').first().json || {};    // empty item when no active state\nconst hasState = !!state.phone_hash;\n\n// lowercase, strip punctuation, collapse spaces\nconst t = (base.text || '').toLowerCase()\n  .replace(/[^\\p{L}\\p{N}\\s]/gu, ' ').replace(/\\s+/g, ' ').trim();\n\n// whole-word phrase match without regex\nconst has = list => list.find(p => (' ' + t + ' ').includes(' ' + p + ' '));\n\n// cancel must be the whole message (or start with 'cancel'), so an address\n// like 'Bus stop, Ikeja' does not cancel the order\nconst cancelHit = cfg.interrupts.cancel.find(p => t === p || (p === 'cancel' && t.startsWith('cancel ')));\n\nlet override = null, reason = null;\nconst h = has(cfg.interrupts.human_request);\nconst c = has(cfg.interrupts.complaint);\n\nif (h)              { override = 'human_request'; reason = 'keyword:' + h; }\nelse if (c)         { override = 'complaint';     reason = 'keyword:' + c; }\nelse if (cancelHit) {\n  if (hasState)     { override = 'cancel';        reason = 'user_cancelled_flow'; }\n  else              { override = 'human_request'; reason = 'cancel_without_active_flow'; }\n}\n\nreturn [{ json: {\n  ...base,\n  override, override_reason: reason,\n  has_state: hasState,\n  state_step: hasState ? state.step : null,\n  state_intent: hasState ? state.intent : null\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        -208
+      ],
+      "id": "f12dc29e-f291-4d7a-bd84-d61c65da5efb",
+      "name": "Interrupt Check",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Extract Data from SW-Config').first().json;\nconst text = $('Hash and Mask Phone Number').first().json.text.toLowerCase();\nif (/\\bzh-\\d+/i.test(text)) return { json: { ...$input.first().json, intent:'order_status', confidence:1, runner_up:null } };\n\nconst has = kw => new RegExp(`\\\\b${kw}\\\\b`).test(text);\nconst scored = Object.entries(cfg.intents).map(([intent, kws]) => ({\n  intent, score: Object.entries(kws).filter(([k]) => has(k)).reduce((s,[,w]) => s + w, 0)\n})).sort((a, b) => b.score - a.score);\n\nconst [top, second] = scored;\nlet intent = 'unknown', confidence = 0;\nif (top.score > 0) {\n  intent = top.intent;\n  const margin = (top.score - second.score) / top.score;\n  confidence = +(Math.min(top.score, 1) * (0.5 + 0.5 * margin)).toFixed(2);\n}\nreturn { json: { ...$input.first().json, intent, confidence, runner_up: second.score > 0 ? second.intent : null } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3136,
+        288
+      ],
+      "id": "a88da185-7279-4cf0-a00c-036104b6fe70",
+      "name": "Classifier"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "bdbec661-1b96-4425-b073-156ef9de4c63",
+              "leftValue": "={{ $('Classifier').item.json.confidence }}",
+              "rightValue": "={{ $('Extract Data from SW-Config').first().json.threshold }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3584,
+        288
+      ],
+      "id": "fc9d5e43-b306-4462-b85a-2636c5c0d26f",
+      "name": "Confident?"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bgErERDFWg6EkPU5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bgErERDFWg6EkPU5",
+          "cachedResultName": "SW-Escalate"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "after_hours": "={{ $('Business Hours').first().json.after_hours }}",
+            "send_ack": true,
+            "category": "low_confidence",
+            "reason": "Max attempts reached without recognizing intent",
+            "priority": "normal",
+            "phone_hash": "={{ $('Hash and Mask Phone Number').first().json.phone_hash }}",
+            "phone_masked": "={{ $('Hash and Mask Phone Number').first().json.phone_masked }}",
+            "request_id": "={{ $('Hash and Mask Phone Number').first().json.request_id }}",
+            "wa_phone": "={{ $('Hash and Mask Phone Number').first().json.wa_phone }}",
+            "context": "={{ $('Hash and Mask Phone Number').first().json.text }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "after_hours",
+              "displayName": "after_hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_ack",
+              "displayName": "send_ack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4032,
+        1104
+      ],
+      "id": "6aafbe31-bafc-434d-beb4-bbbe04fd2aa7",
+      "name": "Escalate Low Confidence"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "product_enquiry",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "2021a54b-f315-40b5-8dc1-c67a7fc0afb4"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "2959ff0a-4d25-422f-9c0d-23f3025b82ac",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "order_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "86f2cef9-4cfd-4ecc-bd76-acfa5eb60b28",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "place_order",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "4684a818-5248-42c5-9095-4c522ed95165",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "delivery_info",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "68d00ce5-7a40-4050-9857-34d0668e7fad",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "payment_info",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "b9382056-12b8-475e-9cde-c1d27bbfc0c0",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "complaint_refund",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        4032,
+        208
+      ],
+      "id": "909afeab-c940-412b-a2fc-0ee1331f25ed",
+      "name": "Switch Intent",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item =$input.first().json;\n\nconst raw  = (item.text || '').toLowerCase();\n\n// 1. Keep only letters, digits, spaces and hyphens, then collapse spaces\nlet text = raw.replace(/[^\\p{L}\\p{N}\\s-]/gu, ' ').replace(/\\s+/g, ' ').trim();\n\n// 2. Remove whole phrases first, longest first\nconst phrases = [\n  'how much is', 'how much are', 'how much does', 'how much for', 'how much',\n  'what is the price of', 'what is the price for', 'price of', 'price for',\n  'cost of', 'do you have', 'do you sell', 'is there', 'are there',\n  'i want to know', 'i would like to know', 'can i get', 'can i buy',\n  'is available', 'are available', 'in stock', 'please', 'pls'\n];\nfor (const p of phrases) {\n  text = text.replace(new RegExp(`\\\\b${p}\\\\b`, 'g'), ' ');\n}\n\n// 3. Stopwords, removed as whole words only\nconst stopwords = new Set([\n  'the', 'a', 'an', 'is', 'are', 'for', 'of', 'to', 'me', 'my', 'i', 'you', 'your',\n  'any', 'some', 'this', 'that', 'it', 'and', 'or', 'what', 'whats', 'how', 'much',\n  'price', 'cost', 'available', 'stock', 'have', 'got', 'hi', 'hello'\n]);\n\n// 4. Tokenise, drop stopwords and 1-letter leftovers, singularise, dedupe, cap at 6\nconst tokens = [...new Set(\n  text.split(' ')\n    .filter(t => t.length >= 2 && !stopwords.has(t))\n    .map(t => (t.length > 3 && t.endsWith('s') && !t.endsWith('ss')) ? t.slice(0, -1) : t)\n)].slice(0, 6);\n\n// 5. Nothing left means no product was named (for example just \"price?\")\nif (tokens.length === 0) {\n  return [{ json: { ...item, needs_clarification: true, search_tokens: [], sql: null } }];\n}\n\nconst where = tokens\n  .map(t => `(name ILIKE '%${t}%' OR COALESCE(keywords,'') ILIKE '%${t}%')`)\n  .join(' AND ');\nconst sql = `SELECT sku, name, price_ngn, stock FROM products WHERE ${where} ORDER BY LENGTH(name) LIMIT 3`;\n\nreturn [{ json: { ...item, needs_clarification: false, search_tokens: tokens, sql } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        -592
+      ],
+      "id": "9a861aec-e0c9-48ff-bedb-b85922fc2f23",
+      "name": "Extract Search Texts"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d33d65c3-a600-4708-ae18-9a3694b488d2",
+              "leftValue": "={{ $json.needs_clarification }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4480,
+        -592
+      ],
+      "id": "73668985-9502-4f02-bdd4-d2ca337432f4",
+      "name": "Needs Clarification"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx  = $('Extract Search Texts').first().json;\n\nconst rows = $input.all().map(i => i.json).filter(r => r.name);\nconst naira = n => '₦' + Number(n).toLocaleString('en-NG');\n\nlet reply;\nif (rows.length === 0) {\n  reply = 'I could not find that item. Check the name, or send CATALOGUE to see everything we have in stock.';\n} else if (rows.length === 1) {\n  const r = rows[0];\n  reply = r.stock > 0\n    ? `The ${r.name} costs ${naira(r.price_ngn)}. We currently have ${r.stock} in stock.`\n    : `The ${r.name} costs ${naira(r.price_ngn)}, but it is currently out of stock.`;\n} else {\n  reply = 'I found a few matches:\\n'\n    + rows.map((r, i) => `${i + 1}. ${r.name} - ${naira(r.price_ngn)}${r.stock > 0 ? '' : ' (out of stock)'}`).join('\\n')\n    + '\\n\\nPlease send the full name of the one you want.';\n}\n\nreturn [{ json: { ...ctx, reply_text: reply } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4928,
+        -496
+      ],
+      "id": "03621f48-98d7-41e8-898f-a2b428febed6",
+      "name": "Build Reply"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "text": "Which product would you like to know about? Send the product name, or send CATALOGUE to see what we have.",
+            "phone_hash": "={{ $('Extract Search Texts').item.json.phone_hash }}",
+            "phone_masked": "={{ $('Extract Search Texts').item.json.phone_masked }}",
+            "wa_phone": "={{ $('Extract Search Texts').item.json.wa_phone }}",
+            "request_id": "={{ $('Extract Search Texts').item.json.request_id }}",
+            "handled_by": "bot"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4704,
+        -688
+      ],
+      "id": "01a5de9e-d5ed-4599-b4c2-39c30a12b25d",
+      "name": "Reply Needs Clarification"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone_hash": "={{ $('Extract Search Texts').item.json.phone_hash }}",
+            "wa_phone": "={{ $('Extract Search Texts').item.json.wa_phone }}",
+            "request_id": "={{ $('Extract Search Texts').item.json.request_id }}",
+            "text": "={{ $json.reply_text }}",
+            "handled_by": "bot",
+            "phone_masked": "={{ $('Extract Search Texts').item.json.phone_masked }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        5152,
+        -496
+      ],
+      "id": "a9a06a98-948f-49e2-a00f-f2d2744f48b8",
+      "name": "Reply List Products"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;               // message context from Switch Intent or Route by State\nconst text = (item.text || '').toUpperCase();\n\nconst found = text.match(/\\bZH-\\d+\\b/);         // anything shaped like an order ID\nlet order_id = null, lookup_status;\n\nif (!found) lookup_status = 'missing_id';\nelse if (!/^ZH-\\d{5}$/.test(found[0])) lookup_status = 'bad_format';   // for example ZH-12\nelse { order_id = found[0]; lookup_status = 'valid'; }\n\n// Safe to inline: order_id passed the strict format check and phone_hash is the hex HMAC output.\n// When there is no valid ID the query matches nothing, so the node below still runs.\nconst sql = order_id\n  ? `SELECT order_id, status, updated_at FROM orders WHERE order_id='${order_id}' AND phone_hash='${item.phone_hash}'`\n  : `SELECT order_id, status, updated_at FROM orders WHERE false`;\n\nreturn [{ json: { ...item, order_id, lookup_status, sql } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        -48
+      ],
+      "id": "559634d3-5aaf-4aff-9fff-1438447353e7",
+      "name": "Extract Order ID"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4bbf612b-2b70-4135-8d9c-d6ecbe892437",
+              "leftValue": "={{ $json.order_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4704,
+        -48
+      ],
+      "id": "3655798c-5940-46fe-9ddb-12bc39d6caa2",
+      "name": "Order Exists?"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "text": "=Order {{ $('Fetch Order').item.json.order_id }}: {{ $('Extract Data from SW-Config').item.json.messages.status_text[$('Fetch Order').item.json.status] || ('Status: ' + $('Fetch Order').item.json.status) }}",
+            "phone_hash": "={{ $('Extract Order ID').item.json.phone_hash }}",
+            "wa_phone": "={{ $('Extract Order ID').item.json.wa_phone }}",
+            "request_id": "={{ $('Extract Order ID').item.json.request_id }}",
+            "handled_by": "bot",
+            "phone_masked": "={{ $('Extract Order ID').item.json.phone_masked }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        5152,
+        -304
+      ],
+      "id": "911464ab-3cbd-4d3b-937f-c4a69797c454",
+      "name": "Send Order Status Response"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone_hash": "={{ $('Extract Order ID').item.json.phone_hash }}",
+            "wa_phone": "={{ $('Extract Order ID').item.json.wa_phone }}",
+            "request_id": "={{ $('Extract Order ID').item.json.request_id }}",
+            "text": "={{ ({   missing_id: $('Extract Data from SW-Config').item.json.messages.order_status_prompt,   bad_format: $('Extract Data from SW-Config').item.json.messages.order_status_bad_format,   valid:      $('Extract Data from SW-Config').item.json.messages.order_status_no_match })[$('Extract Order ID').item.json.lookup_status] }}",
+            "phone_masked": "={{ $('Extract Order ID').item.json.phone_masked }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        5376,
+        48
+      ],
+      "id": "993048ca-f280-40b7-a6b9-c64899693639",
+      "name": "Reply Order Not Found"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"reply_text\": \"{{ 'Our delivery fees:\\n' + $('Extract Data from SW-Config').item.json.zones.map(z => '- ' + z.label + ': ₦' + Number(z.fee).toLocaleString('en-NG')).join('\\n') + '\\n\\n' + $('Extract Data from SW-Config').item.json.messages.delivery }}\"\n}\n",
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        4256,
+        1008
+      ],
+      "id": "b6ed6c22-dcf0-425f-90d1-3006901a29f5",
+      "name": "Set Reply Text"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone_hash": "={{ $json.phone_hash}}",
+            "wa_phone": "={{ $json.wa_phone}}",
+            "request_id": "={{ $json.request_id}}",
+            "text": "={{ $json.reply_text}}",
+            "handled_by": "bot",
+            "phone_masked": "={{ $json.phone_masked}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4480,
+        1376
+      ],
+      "id": "3ed4caee-f8c0-4f59-9eb5-c2a704f85e23",
+      "name": "Reply Delivery Info"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6acd9ee7-0ce5-45a9-abff-b6c33f3b79bf",
+              "leftValue": "={{ /\\b(paid|sent|transferred|receipt|proof)\\b/i.test($json.text) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4256,
+        624
+      ],
+      "id": "6d9f5dfc-8e08-45fe-a93c-72a2744a6d33",
+      "name": "Is Paid?"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"reply_text\": \"{{ $('Extract Data from SW-Config').item.json.messages.payment_info }}\"\n}\n",
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        4480,
+        1184
+      ],
+      "id": "8b46b760-e7fe-4806-b027-377b9ed83081",
+      "name": "Set Reply Text1"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone_hash": "={{ $json.phone_hash}}",
+            "wa_phone": "={{ $json.wa_phone}}",
+            "request_id": "={{ $json.request_id}}",
+            "text": "={{ $json.reply_text}}",
+            "handled_by": "bot",
+            "phone_masked": "={{ $json.phone_masked}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4704,
+        1184
+      ],
+      "id": "ae0755fc-ae01-4882-997e-cf3c85bb8c68",
+      "name": "Call 'SW-Reply'"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "92b14fb1-5cfe-42a4-895f-5211f31f7da7",
+              "leftValue": "={{ /\\bZH-\\d{5}\\b/i.test($json.text) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4480,
+        896
+      ],
+      "id": "e3b5a010-5970-4ec4-af8c-4af3d6409c06",
+      "name": "Has Order ID?",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone_hash": "={{ $('Has Order ID?').item.json.phone_hash }}",
+            "wa_phone": "={{ $('Has Order ID?').item.json.wa_pphone }}",
+            "request_id": "={{ $('Has Order ID?').item.json.request_id }}",
+            "text": "={{ $('Extract Data from SW-Config').item.json.messages.payment_ask_id }}",
+            "handled_by": "bot",
+            "phone_masked": "={{ $('Has Order ID?').item.json.phone_masked }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4928,
+        992
+      ],
+      "id": "ccecd2c0-5f15-4d14-b869-ec1c001c12d8",
+      "name": "Reply Payment Issues"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bgErERDFWg6EkPU5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bgErERDFWg6EkPU5",
+          "cachedResultName": "SW-Escalate"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "after_hours": "={{ $('Has Order ID?').first().json.after_hours }}",
+            "send_ack": true,
+            "category": "payment_verification",
+            "reason": "customer reports payment",
+            "priority": "normal",
+            "phone_hash": "={{ $('Has Order ID?').first().json.phone_hash }}",
+            "phone_masked": "={{ $('Has Order ID?').first().json.phone_masked }}",
+            "request_id": "={{ $('Has Order ID?').first().json.request_id }}",
+            "context": "={{ JSON.stringify({ order_id: ($('Has Order ID?').first().json.text.toUpperCase().match(/\\bZH-\\d{5}\\b/) || [null])[0], text: $('Has Order ID?').item.json.text }) }}",
+            "wa_phone": "={{ $('Has Order ID?').first().json.wa_phone }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "after_hours",
+              "displayName": "after_hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_ack",
+              "displayName": "send_ack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4928,
+        528
+      ],
+      "id": "f1864d32-fe32-453d-aefc-c8a08137df6b",
+      "name": "Escalate Order"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "892269bf-6077-4898-ac0a-28dc41f5ab5a",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        -16
+      ],
+      "id": "4af927d5-a615-448d-96f6-0a38ccace3f3",
+      "name": "New Message?",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1767cd20-425c-4708-a7fd-4af84c9554cb",
+              "leftValue": "={{ $('Hash and Mask Phone Number').first().json.is_text }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2016,
+        -112
+      ],
+      "id": "9bca6a61-d592-4204-b6a7-c4fd09358b54",
+      "name": "Is Text?"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bgErERDFWg6EkPU5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bgErERDFWg6EkPU5",
+          "cachedResultName": "SW-Escalate"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "after_hours": "={{ $('Business Hours').item.json.after_hours }}",
+            "send_ack": true,
+            "phone_hash": "={{ $('Hash and Mask Phone Number').item.json.phone_hash }}",
+            "phone_masked": "={{ $('Hash and Mask Phone Number').item.json.phone_masked }}",
+            "request_id": "={{ $('Hash and Mask Phone Number').item.json.request_id }}",
+            "category": "media_received",
+            "reason": "User sent non-text input",
+            "priority": "normal",
+            "context": "={{ $('Hash and Mask Phone Number').item.json.image }}",
+            "wa_phone": "={{ $('Hash and Mask Phone Number').item.json.wa_phone }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "after_hours",
+              "displayName": "after_hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_ack",
+              "displayName": "send_ack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        2240,
+        -16
+      ],
+      "id": "8efe5fde-fd85-4356-a4b6-1bfdcb364bae",
+      "name": "Escalate Not Text",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.override }}",
+                    "rightValue": "human_request",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "5cc2b015-41f6-47ad-bead-b611d0c334ca"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "ba09b9ed-1683-4a73-a4cb-0f2119e4b7f9",
+                    "leftValue": "={{ $json.override }}",
+                    "rightValue": "complaint",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c990f585-597f-4982-b8ca-cb8766f4af90",
+                    "leftValue": "={{ $json.override }}",
+                    "rightValue": "cancel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "08dbb120-be09-49e7-9f72-f1b4803aa882",
+                    "leftValue": "={{ $json.has_state }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2688,
+        -256
+      ],
+      "id": "14c278c8-f5cb-4a6e-86ae-22e9bc8d99ef",
+      "name": "Route",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bgErERDFWg6EkPU5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bgErERDFWg6EkPU5",
+          "cachedResultName": "SW-Escalate"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "after_hours": "={{ $('Business Hours').item.json.after_hours }}",
+            "send_ack": true,
+            "reason": "={{ $json.override_reason }}",
+            "priority": "high",
+            "phone_hash": "={{ $('Hash and Mask Phone Number').item.json.phone_hash }}",
+            "phone_masked": "={{ $('Hash and Mask Phone Number').item.json.phone_masked }}",
+            "request_id": "={{ $('Hash and Mask Phone Number').item.json.request_id }}",
+            "wa_phone": "={{ $('Hash and Mask Phone Number').item.json.wa_phone }}",
+            "context": "={{ $('Hash and Mask Phone Number').item.json.text }}",
+            "category": "complaint_refund"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "after_hours",
+              "displayName": "after_hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_ack",
+              "displayName": "send_ack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        2912,
+        -288
+      ],
+      "id": "97b25bff-13e2-49ee-84b9-9018e4cfaa11",
+      "name": "Escalate Complaint Route"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bgErERDFWg6EkPU5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bgErERDFWg6EkPU5",
+          "cachedResultName": "SW-Escalate"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "after_hours": "={{ $('Business Hours').item.json.after_hours }}",
+            "send_ack": true,
+            "category": "human_request",
+            "reason": "={{ $json.override_reason }}",
+            "priority": "normal",
+            "phone_hash": "={{ $('Hash and Mask Phone Number').item.json.phone_hash }}",
+            "phone_masked": "={{ $('Hash and Mask Phone Number').item.json.phone_masked }}",
+            "request_id": "={{ $('Hash and Mask Phone Number').item.json.request_id }}",
+            "wa_phone": "={{ $('Hash and Mask Phone Number').item.json.wa_phone }}",
+            "context": "={{ JSON.stringify({ previous_state: $json.state_intent, message: $json.state_step }) }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "after_hours",
+              "displayName": "after_hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_ack",
+              "displayName": "send_ack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        2912,
+        -480
+      ],
+      "id": "40eab17e-58a7-4bb1-ad84-459c8df0f474",
+      "name": "Escalate Human Request"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone_hash": "={{ $('Hash and Mask Phone Number').item.json.phone_hash }}",
+            "wa_phone": "={{ $('Hash and Mask Phone Number').item.json.wa_phone }}",
+            "request_id": "={{ $('Hash and Mask Phone Number').item.json.request_id }}",
+            "text": "No problem, I’ve cancelled that. Message us any time to start again.",
+            "handled_by": "sales",
+            "phone_masked": "={{ $('Hash and Mask Phone Number').item.json.phone_masked }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        3136,
+        -96
+      ],
+      "id": "527773c6-e868-45fc-a4d1-6ffbd7c580f5",
+      "name": "Send Order Cancel Reply"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ...$('Classifier').first().json } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3808,
+        288
+      ],
+      "id": "d298c114-4ff3-4bcc-b964-6e615be2d141",
+      "name": "Restore Context"
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $input.first().json;\nreturn [{ json: { ...base, state_intent: 'place_order', state_step: 'item' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        240
+      ],
+      "id": "0af20263-7303-4278-bf79-645f78fe528d",
+      "name": "place_order start"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "nUPcILrfAEC0tDHN",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/nUPcILrfAEC0tDHN",
+          "cachedResultName": "SW-Config"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4480,
+        240
+      ],
+      "id": "c2c3fb24-23e8-4727-a217-8698b4c19585",
+      "name": "Load Config"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "text": "={{ $('Load Config').first().json.messages.order_ask_item }}",
+            "phone_hash": "={{ $('place_order start').first().json.phone_hash }}",
+            "wa_phone": "={{ $('place_order start').first().json.wa_phone }}",
+            "request_id": "={{ $('place_order start').first().json.request_id }}",
+            "handled_by": "bot",
+            "phone_masked": "={{ $('place_order start').first().json.phone_masked }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4928,
+        240
+      ],
+      "id": "c3393899-c692-4c51-b0f4-6bcd78610aeb",
+      "name": "Call 'SW-Reply'1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $input.first().json;\nconst m = (base.text || '').toUpperCase().match(/\\bZH-\\d{5}\\b/);\n\nconst context = {\n  order_id: m ? m[0] : null,\n  text: (base.text || '').slice(0, 300)\n};\n\nreturn [{ json: { ...base, context: JSON.stringify(context) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        1200
+      ],
+      "id": "504b0457-4798-438a-aa42-a4e6c426b7a8",
+      "name": "Build Complaint Context"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bgErERDFWg6EkPU5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bgErERDFWg6EkPU5",
+          "cachedResultName": "SW-Escalate"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "after_hours": "={{ $json.after_hours }}",
+            "send_ack": true,
+            "category": "complaint_refund",
+            "reason": "customer complaint or refund request",
+            "priority": "high",
+            "phone_hash": "={{ $json.phone_hash }}",
+            "phone_masked": "={{ $json.phone_masked }}",
+            "request_id": "={{ $json.request_id }}",
+            "context": "={{ $json.context }}",
+            "wa_phone": "={{ $json.wa_phone }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "after_hours",
+              "displayName": "after_hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_ack",
+              "displayName": "send_ack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4480,
+        1568
+      ],
+      "id": "9e1fdfdf-7c7a-475f-ae2b-f51fde2ce4c9",
+      "name": "Call 'SW-Escalate'"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bgErERDFWg6EkPU5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bgErERDFWg6EkPU5",
+          "cachedResultName": "SW-Escalate"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "after_hours": "={{ $json.after_hours }}",
+            "send_ack": true,
+            "category": "unknown",
+            "reason": "={{ 'no switch rule for intent: ' + $json.intent }}",
+            "context": "={{ JSON.stringify({ text: ($json.text || '').slice(0, 300), intent: $json.intent, confidence: $json.confidence }) }}",
+            "wa_phone": "={{ $json.wa_phone }}",
+            "request_id": "={{ $json.request_id }}",
+            "phone_masked": "={{ $json.phone_masked }}",
+            "phone_hash": "={{ $json.phone_hash }}",
+            "priority": "normal"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "after_hours",
+              "displayName": "after_hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_ack",
+              "displayName": "send_ack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4256,
+        432
+      ],
+      "id": "8dd4260e-317e-48b7-bd0b-f71b6534204c",
+      "name": "Call 'SW-Escalate'1"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.state_intent }}",
+                    "rightValue": "place_order",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "577e2c26-6923-4fba-9488-3a29e03f5037"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "1edf5601-6630-4d3f-b9a0-4035fb59309f",
+                    "leftValue": "={{ $json.state_intent }}",
+                    "rightValue": "order_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c08f48b2-faf6-4e39-a6f6-4fc2d2ce8aa1",
+                    "leftValue": "={{ $json.state_intent }}",
+                    "rightValue": "payment_info",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2912,
+        1632
+      ],
+      "id": "58717d4b-a9c8-464a-a009-949580da6d87",
+      "name": "Route by State",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0098893e-bc93-4179-ad3d-714d94371f2d",
+              "leftValue": "={{ $('Interrupt Check').item.json.state_step}}",
+              "rightValue": "item",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3136,
+        2064
+      ],
+      "id": "8edca8a2-d959-4338-b5dd-ac241e6fb043",
+      "name": "State Item?",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nconst raw  = (item.text || '').toLowerCase();\n\n// 1. Keep only letters, digits, spaces and hyphens, then collapse spaces\nlet text = raw.replace(/[^\\p{L}\\p{N}\\s-]/gu, ' ').replace(/\\s+/g, ' ').trim();\n\n// 2. Remove whole phrases first, longest first\nconst phrases = [\n  'how much is', 'how much are', 'how much does', 'how much for', 'how much',\n  'what is the price of', 'what is the price for', 'price of', 'price for',\n  'cost of', 'do you have', 'do you sell', 'is there', 'are there',\n  'i want to know', 'i would like to know', 'can i get', 'can i buy',\n  'is available', 'are available', 'in stock', 'please', 'pls'\n];\nfor (const p of phrases) {\n  text = text.replace(new RegExp(`\\\\b${p}\\\\b`, 'g'), ' ');\n}\n\n// 3. Stopwords, removed as whole words only\nconst stopwords = new Set([\n  'the', 'a', 'an', 'is', 'are', 'for', 'of', 'to', 'me', 'my', 'i', 'you', 'your',\n  'any', 'some', 'this', 'that', 'it', 'and', 'or', 'what', 'whats', 'how', 'much',\n  'price', 'cost', 'available', 'stock', 'have', 'got', 'hi', 'hello'\n]);\n\n// 4. Tokenise, drop stopwords and 1-letter leftovers, singularise, dedupe, cap at 6\nconst tokens = [...new Set(\n  text.split(' ')\n    .filter(t => t.length >= 2 && !stopwords.has(t))\n    .map(t => (t.length > 3 && t.endsWith('s') && !t.endsWith('ss')) ? t.slice(0, -1) : t)\n)].slice(0, 6);\n\n// 5. Nothing left means no product was named (for example just \"price?\")\nif (tokens.length === 0) {\n  return [{ json: { ...item, needs_clarification: true, search_tokens: [], sql: null } }];\n}\n\nconst where = tokens\n  .map(t => `(name ILIKE '%${t}%' OR COALESCE(keywords,'') ILIKE '%${t}%')`)\n  .join(' AND ');\nconst sql = `SELECT sku, name, price_ngn, stock FROM products WHERE ${where} ORDER BY LENGTH(name) LIMIT 3`;\n\nreturn [{ json: { ...item, needs_clarification: false, search_tokens: tokens, sql } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3392,
+        1648
+      ],
+      "id": "3c626699-ed57-48ad-ab80-6d6c743a7df5",
+      "name": "Extract Search Texts1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $input.first().json.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];\nif (!msg) return { json: { valid: false, ignore: true } };   // delivery and read receipts\n\nconst type = msg.type;\nconst text = type === 'text' ? msg.text?.body\n  : type === 'button' ? msg.button?.text\n  : type === 'interactive' ? (msg.interactive?.button_reply?.title ?? msg.interactive?.list_reply?.title)\n  : '';\nconst errors = [];\nif (!msg.id) errors.push('missing_message_id');\nif (!/^\\d{10,15}$/.test(msg.from || '')) errors.push('bad_phone');\nif (type === 'text' && !(text || '').trim()) errors.push('empty_text');\n\nreturn { json: {\n  valid: errors.length === 0, errors,\n  request_id: msg.id, wa_message_id: msg.id, wa_phone: msg.from, msg_type: type,\n  is_text: ['text','button','interactive'].includes(type),\n  text: (text || '').trim().slice(0, 1000),\n  image: msg.image?.id\n}};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        80
+      ],
+      "id": "70abc825-35a0-47d2-81b3-d044a850e3ff",
+      "name": "Normalize"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "55a330d2-6528-4fb9-9e9d-ed50a1254fb0",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        80
+      ],
+      "id": "fd2cffe0-375c-42ce-8c14-8dc94d84b91f",
+      "name": "Normalized is Valid?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg  = $('Extract Data from SW-Config').first().json;\nconst st   = $('Load State').first().json;\nconst text = $('Normalize').first().json.text;\nconst rows = $('List Products').all().length ? $('List Products').all().map(i => i.json).filter(r => r.sku) : [];\nconst c = JSON.parse(st.collected_json || '{}');\nlet step = st.step, attempts = st.attempts || 0, reply = '', advance = false, done = false;\nconst naira = n => '₦' + Number(n).toLocaleString('en-NG');\n\nif (step === 'item') {\n  if (rows.length === 1 && rows[0].stock > 0) {\n    c.item = rows[0]; step = 'qty'; advance = true;\n    reply = `${rows[0].name} is ${naira(rows[0].price_ngn)}. How many would you like?`;\n  } else if (rows.length === 1) reply = `Sorry, ${rows[0].name} is out of stock. Want something else?`;\n  else if (rows.length > 1) reply = 'I found:\\n' + rows.map((r,i) => `${i+1}. ${r.name}`).join('\\n') + '\\nPlease send the full name.';\n  else reply = 'I could not find that item. Please send the product name.';\n}\nelse if (step === 'qty') {\n  const q = parseInt((text.match(/\\d+/) || [])[0], 10), max = Math.min(cfg.max_qty, c.item.stock);\n  if (q >= 1 && q <= max) { c.qty = q; step = 'address'; advance = true;\n    reply = 'Please send your full delivery address (we deliver to Lagos, Abuja and Port Harcourt).'; }\n  else reply = `Please send a number between 1 and ${max}.`;\n}\nelse if (step === 'address') {\n  const t = text.toLowerCase();\n  const zone = cfg.zones.find(z => z.match.some(m => new RegExp(`\\\\b${m}\\\\b`).test(t)));\n  if (text.length >= 10 && zone) { c.address = text; c.zone = zone.label; c.fee = zone.fee;\n    step = 'name'; advance = true; reply = 'Thanks. What name should we put on the order?'; }\n  else reply = 'I need a full address in Lagos, Abuja or Port Harcourt (street, area, city). Please resend it.';\n}\nelse if (step === 'name') {\n  if (/^[\\p{L}][\\p{L} .'-]{1,59}$/u.test(text)) {\n    c.name = text; c.total = c.item.price_ngn * c.qty + c.fee; step = 'confirm'; advance = true;\n    reply = `Please confirm:\\n${c.qty} x ${c.item.name}\\nDelivery (${c.zone}): ${naira(c.fee)}\\nTotal: ${naira(c.total)}\\nReply YES to confirm or CANCEL.`;\n  } else reply = 'Please send your name (letters only).';\n}\nelse if (step === 'confirm') {\n  if (/^(yes|y|confirm|ok|okay)$/i.test(text.trim())) done = true;\n  else reply = 'Reply YES to confirm, or CANCEL to stop.';\n}\nattempts = (advance || done) ? 0 : attempts + 1;\n\nconst q = v => v === null || v === undefined\n  ? 'NULL'\n  : \"'\" + String(v).replace(/\\0/g, '').replace(/'/g, \"''\") + \"'\";\n\nconst save_sql = `INSERT INTO conversation_state (phone_hash, intent, step, collected_json, attempts, expires_at)\nVALUES (${q(st.phone_hash)}, 'place_order', ${q(step)}, ${q(JSON.stringify(c))}, ${Number(attempts)},\n        now() + interval '${Number(cfg.state_ttl_min)} minutes')\nON CONFLICT (phone_hash) DO UPDATE SET\n  step = EXCLUDED.step, collected_json = EXCLUDED.collected_json,\n  attempts = EXCLUDED.attempts, expires_at = EXCLUDED.expires_at;`;\n\nreturn [{ json: { phone_hash: st.phone_hash, step, attempts, advance, done,\n  escalate: attempts >= cfg.max_attempts, reply_text: reply,\n  collected: c, collected_json: JSON.stringify(c), save_sql } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3808,
+        2064
+      ],
+      "id": "f326f171-6f95-4bd1-addb-992de52fb21c",
+      "name": "PlaceOrder Step",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa960f99-f934-42c2-b6cf-68263871670c",
+              "leftValue": "={{ $json.escalate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4256,
+        2160
+      ],
+      "id": "4ce22c8a-60ff-430c-90b2-08e51923f918",
+      "name": "Stuck?",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2cebef8f-7736-43d7-99bb-b6f15e7cfd14",
+              "leftValue": "={{ $json.done }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4032,
+        2064
+      ],
+      "id": "9fddfbb8-95ef-4637-bcbb-b854ec9a2815",
+      "name": "Done?"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "text": "={{ $('PlaceOrder Step').first().json.reply_text }}",
+            "phone_hash": "={{ $('Interrupt Check').first().json.phone_hash }}",
+            "wa_phone": "={{ $('Interrupt Check').first().json.wa_phone }}",
+            "request_id": "={{ $('Interrupt Check').first().json.request_id }}",
+            "handled_by": "bot",
+            "phone_masked": "={{ $('Interrupt Check').first().json.phone_masked }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4704,
+        2256
+      ],
+      "id": "65e3f86f-17ff-40ca-b565-434e8dc822a3",
+      "name": "Call 'SW-Reply'2"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bgErERDFWg6EkPU5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bgErERDFWg6EkPU5",
+          "cachedResultName": "SW-Escalate"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "after_hours": "={{ $('Interrupt Check').first().json.after_hours }}",
+            "send_ack": true,
+            "category": "intake_stuck",
+            "reason": "customer could not complete order intake",
+            "priority": "normal",
+            "context": "={{ JSON.stringify({ step: $('PlaceOrder Step').first().json.step }) }}",
+            "wa_phone": "={{ $('Interrupt Check').first().json.wa_phone }}",
+            "request_id": "={{ $('Interrupt Check').first().json.request_id }}",
+            "phone_masked": "={{ $('Interrupt Check').first().json.phone_masked }}",
+            "phone_hash": "={{ $('Interrupt Check').first().json.phone_hash }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "after_hours",
+              "displayName": "after_hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_ack",
+              "displayName": "send_ack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        4928,
+        2064
+      ],
+      "id": "586f7d57-84a8-4050-8db9-2439601a22b5",
+      "name": "Call 'SW-Escalate'2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst q = v => v === null || v === undefined\n  ? 'NULL'\n  : \"'\" + String(v).replace(/\\0/g, '').replace(/'/g, \"''\") + \"'\";\n\nconst ps = $('PlaceOrder Step').first().json;\nconst c  = ps.collected;\nconst order_id = 'ZH-' + (10000 + crypto.randomInt(90000));\nconst items = JSON.stringify([{ sku: c.item.sku, name: c.item.name, qty: c.qty, unit_price: c.item.price_ngn }]);\n\nconst sql = `INSERT INTO orders (order_id, phone_hash, status, items_json, total_ngn, delivery_zone, address, customer_name)\nVALUES (${q(order_id)}, ${q(ps.phone_hash)}, 'awaiting_payment', ${q(items)}, ${Number(c.total)}, ${q(c.zone)}, ${q(c.address)}, ${q(c.name)});`;\n\nreturn [{ json: { order_id, sql } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        1872
+      ],
+      "id": "bb460dc9-677a-40c4-8a56-358c073393dd",
+      "name": "Get Order ID"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "bgErERDFWg6EkPU5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/bgErERDFWg6EkPU5",
+          "cachedResultName": "SW-Escalate"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "after_hours": "={{ $('Interrupt Check').first().json.after_hours }}",
+            "send_ack": false,
+            "category": "new_order",
+            "reason": "new order awaiting payment",
+            "priority": "normal",
+            "context": "={{ JSON.stringify({ order_id: $('Get Order ID').first().json.order_id, total: $('PlaceOrder Step').first().json.collected.total, zone: $('PlaceOrder Step').first().json.collected.zone }) }}",
+            "wa_phone": "={{ $('Interrupt Check').first().json.wa_phone }}",
+            "request_id": "={{ $('Interrupt Check').first().json.request_id }}",
+            "phone_masked": "={{ $('Interrupt Check').first().json.phone_masked }}",
+            "phone_hash": "={{ $('Interrupt Check').first().json.phone_hash }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "after_hours",
+              "displayName": "after_hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "context",
+              "displayName": "context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_ack",
+              "displayName": "send_ack",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        5152,
+        1872
+      ],
+      "id": "5f45c925-7857-4125-a49e-48a921b17c4c",
+      "name": "Call 'SW-Escalate'3 (new order)"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "text": "={{ 'Order ' + $('Get Order ID').first().json.order_id + ' received: '  + $('PlaceOrder Step').first().json.collected.qty + ' x ' + $('PlaceOrder Step').first().json.collected.item.name  + ', total ₦' + Number($('PlaceOrder Step').first().json.collected.total).toLocaleString('en-NG')  + ' (delivery to ' + $('PlaceOrder Step').first().json.collected.zone + ' included).\\n\\n'  + $('Load Config').first().json.messages.payment_info }}",
+            "handled_by": "bot",
+            "phone_masked": "={{ $('Interrupt Check').first().json.phone_masked }}",
+            "request_id": "={{ $('Interrupt Check').first().json.request_id }}",
+            "wa_phone": "={{ $('Interrupt Check').first().json.wa_phone }}",
+            "phone_hash": "={{ $('Interrupt Check').first().json.phone_hash }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        5376,
+        1872
+      ],
+      "id": "b3d6e1e4-9b07-41c4-a0f0-a81486855264",
+      "name": "Call 'SW-Reply'3"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (wa_message_id, phone_hash, msg_type, text)\nVALUES (\n  '{{ String($json.wa_message_id).replace(/'/g, \"''\") }}',\n  '{{ $json.phone_hash }}',\n  '{{ String($json.msg_type ?? \"\").replace(/'/g, \"''\") }}',\n  '{{ String($json.text ?? \"\").replace(/\\0/g, \"\").replace(/'/g, \"''\") }}'\n)\nON CONFLICT (wa_message_id) DO NOTHING\nRETURNING id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        -16
+      ],
+      "id": "9d23228e-774c-4d78-89bf-85def4a62ef4",
+      "name": "Insert Message",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO contacts (phone_hash, wa_phone)\nVALUES ('{{ $('Hash and Mask Phone Number').item.json.phone_hash }}', '{{ $('Hash and Mask Phone Number').item.json.wa_phone }}')\nON CONFLICT (phone_hash) DO UPDATE SET last_seen = now();",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1344,
+        -112
+      ],
+      "id": "16643a50-4839-4874-8fdd-d0a8f3e6a4f5",
+      "name": "Upsert Contact",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql || 'SELECT sku, name, price_ngn, stock FROM products WHERE false' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4704,
+        -496
+      ],
+      "id": "957c6c95-d428-427e-bc64-9d9a23ba2840",
+      "name": "List Products1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM conversation_state\nWHERE phone_hash = '{{ $('Interrupt Check').item.json.phone_hash }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4704,
+        2064
+      ],
+      "id": "d52b8157-9364-4adc-b39d-0062b9c5d7b7",
+      "name": "Clear State2",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM conversation_state\nWHERE phone_hash = '{{ $('Interrupt Check').item.json.phone_hash }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4928,
+        1872
+      ],
+      "id": "0cd012cf-b664-4cae-8497-2ecc2b1b6e4e",
+      "name": "Clear State3",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM conversation_state\nWHERE phone_hash = '{{ $('Interrupt Check').item.json.phone_hash }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2912,
+        -96
+      ],
+      "id": "8f953fb1-55ee-4430-b9c7-476cb6e4a93a",
+      "name": "Clear State",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM conversation_state\nWHERE phone_hash = '{{ $('Interrupt Check').first().json.phone_hash }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4704,
+        528
+      ],
+      "id": "c2b9e396-6ba2-478b-98ec-5c925af62cbb",
+      "name": "Clear State1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM conversation_state\nWHERE phone_hash = '{{ $('Interrupt Check').item.json.phone_hash }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4928,
+        -304
+      ],
+      "id": "098e27c4-e7c0-4670-9938-d8699ca29f93",
+      "name": "Clear Conversation State",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversation_state (phone_hash, intent, step, collected_json, attempts, expires_at)\nVALUES ('{{ $('Hash and Mask Phone Number').item.json.phone_hash }}', 'place_order', 'item', '{}', 0,\n        now() + interval '{{ Number($('Extract Data from SW-Config').first().json.state_ttl_min) }} minutes')\nON CONFLICT (phone_hash) DO UPDATE SET\n  intent = EXCLUDED.intent, step = EXCLUDED.step, collected_json = '{}',\n  attempts = 0, expires_at = EXCLUDED.expires_at;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4704,
+        240
+      ],
+      "id": "683f9479-7018-4327-8696-898aefdb9fd5",
+      "name": "Upsert State",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversation_state (phone_hash, intent, step, collected_json, attempts, expires_at)\nVALUES ('{{ $('Hash and Mask Phone Number').item.json.phone_hash }}', 'payment_info', 'await_id', '{}', 0,\n        now() + interval '{{ Number($('Extract Data from SW-Config').first().json.state_ttl_min) }} minutes')\nON CONFLICT (phone_hash) DO UPDATE SET\n  intent = EXCLUDED.intent, step = EXCLUDED.step, collected_json = '{}',\n  attempts = 0, expires_at = EXCLUDED.expires_at;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4704,
+        992
+      ],
+      "id": "fc4c8186-50ea-45f2-92b7-87aaf1fd0871",
+      "name": "Upsert State2",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, phone_masked, event, detail)\nVALUES ('{{ String($('Classifier').first().json.request_id).replace(/'/g, \"''\") }}', '{{ $('Classifier').first().json.phone_masked }}', 'low_confidence', 'confidence={{ $('Classifier').first().json.confidence }}');",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3808,
+        1104
+      ],
+      "id": "321d66e5-6834-4ee5-a5ac-f23537f02721",
+      "name": "Audit Low Confidence",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, phone_masked, event, detail)\nVALUES ('{{ String($('Normalize').item.json.request_id || $execution.id).replace(/'/g, \"''\") }}', NULL, 'malformed_payload', 'errors={{ ($('Normalize').item.json.errors || []).join(\";\") }}');",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        176
+      ],
+      "id": "8411936f-05fd-4204-a8e2-62ab73a2e17d",
+      "name": "Audit Malformed Payload",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, phone_masked, event, detail)\nVALUES ('{{ String($('Hash and Mask Phone Number').item.json.wa_message_id).replace(/'/g, \"''\") }}', '{{ $('Hash and Mask Phone Number').item.json.phone_masked }}', 'duplicate_ignored', 'already_processed');",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1344,
+        80
+      ],
+      "id": "dbee7c24-e5b3-4aff-a846-d478ff69e385",
+      "name": "Audit Duplicate Message",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, phone_masked, event, detail)\nVALUES ('{{ String($('Extract Order ID').item.json.request_id).replace(/'/g, \"''\") }}', '{{ $('Extract Order ID').item.json.phone_masked }}', 'order_lookup_miss', 'reason={{ $('Extract Order ID').item.json.lookup_status }}');",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4928,
+        48
+      ],
+      "id": "94e992a3-8a60-4f9c-901b-a143269aa5aa",
+      "name": "Audit Order Miss",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4624,
+        1872
+      ],
+      "id": "2c16f257-4074-4466-afda-e835d821019a",
+      "name": "Create Order",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $('PlaceOrder Step').first().json.save_sql }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4480,
+        2256
+      ],
+      "id": "a3d3563d-f3f9-44ed-875e-74ee4d545275",
+      "name": "Save State1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT phone_hash, intent, step, collected_json, attempts, expires_at\nFROM conversation_state\nWHERE phone_hash = '{{ $('Hash and Mask Phone Number').item.json.phone_hash }}'\n  AND expires_at > now();",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2240,
+        -208
+      ],
+      "id": "c30dfedf-9c3e-4b39-9721-26fee30165d5",
+      "name": "Load State",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE messages\nSET intent = '{{ $('Classifier').item.json.intent }}',\n    confidence = {{ Number($('Classifier').item.json.confidence) }}\nWHERE wa_message_id = '{{ String($('Classifier').item.json.wa_message_id).replace(/'/g, \"''\") }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3360,
+        288
+      ],
+      "id": "ec4b0469-867c-4fed-b875-d6c43144cd88",
+      "name": "Save Classification",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql || 'SELECT sku, name, price_ngn, stock FROM products WHERE false' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3584,
+        1648
+      ],
+      "id": "3fe5f7db-a7be-491d-b5f3-e3db0f99b6f1",
+      "name": "List Products",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4480,
+        -48
+      ],
+      "id": "8e665243-1edf-42e1-b602-d548e0566478",
+      "name": "Fetch Order",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversation_state (phone_hash, intent, step, collected_json, attempts, expires_at)\nVALUES ('{{ $('Hash and Mask Phone Number').item.json.phone_hash }}', 'order_status', 'await_id', '{}', 0,\n        now() + interval '{{ Number($('Extract Data from SW-Config').first().json.state_ttl_min) }} minutes')\nON CONFLICT (phone_hash) DO UPDATE SET\n  intent = EXCLUDED.intent, step = EXCLUDED.step, collected_json = '{}',\n  attempts = 0, expires_at = EXCLUDED.expires_at;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        5152,
+        48
+      ],
+      "id": "cebd30aa-2b54-4916-adde-06e0de370797",
+      "name": "Upsert State3",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, phone_masked, event, detail)\nVALUES ('{{ $('Interrupt Check').first().json.request_id }}', '{{ $('Interrupt Check').first().json.phone_masked }}', 'flow_cancelled', 'User cancelled active flow');",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3360,
+        -96
+      ],
+      "id": "90d12da0-25ab-41ed-ac5f-d90a37e78bf0",
+      "name": "Audit Order Cancelled",
+      "alwaysOutputData": false,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM conversation_state\nWHERE phone_hash = '{{ $('Interrupt Check').first().json.phone_hash }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3136,
+        -480
+      ],
+      "id": "6a9851a5-f54b-493e-85fa-81a3a073daff",
+      "name": "Clear State4",
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Receive WhatsApp Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash and Mask Phone Number": {
+      "main": [
+        [
+          {
+            "node": "Insert Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Data from SW-Config": {
+      "main": [
+        [
+          {
+            "node": "Business Hours",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Business Hours": {
+      "main": [
+        [
+          {
+            "node": "Is Text?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interrupt Check": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classifier": {
+      "main": [
+        [
+          {
+            "node": "Save Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confident?": {
+      "main": [
+        [
+          {
+            "node": "Restore Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Low Confidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Intent": {
+      "main": [
+        [
+          {
+            "node": "Extract Search Texts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Order ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "place_order start",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Reply Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Paid?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Complaint Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 'SW-Escalate'1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Search Texts": {
+      "main": [
+        [
+          {
+            "node": "Needs Clarification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Clarification": {
+      "main": [
+        [
+          {
+            "node": "Reply Needs Clarification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "List Products1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Reply": {
+      "main": [
+        [
+          {
+            "node": "Reply List Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Order ID": {
+      "main": [
+        [
+          {
+            "node": "Fetch Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Order Exists?": {
+      "main": [
+        [
+          {
+            "node": "Clear Conversation State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Order Miss",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Reply Text": {
+      "main": [
+        [
+          {
+            "node": "Reply Delivery Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Paid?": {
+      "main": [
+        [
+          {
+            "node": "Has Order ID?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Reply Text1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Reply Text1": {
+      "main": [
+        [
+          {
+            "node": "Call 'SW-Reply'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Order ID?": {
+      "main": [
+        [
+          {
+            "node": "Clear State1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upsert State2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Message?": {
+      "main": [
+        [
+          {
+            "node": "Upsert Contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Duplicate Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Text?": {
+      "main": [
+        [
+          {
+            "node": "Load State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate Not Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Escalate Human Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Escalate Complaint Route",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clear State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route by State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Order Cancel Reply": {
+      "main": [
+        [
+          {
+            "node": "Audit Order Cancelled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Context": {
+      "main": [
+        [
+          {
+            "node": "Switch Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "place_order start": {
+      "main": [
+        [
+          {
+            "node": "Load Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Upsert State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Complaint Context": {
+      "main": [
+        [
+          {
+            "node": "Call 'SW-Escalate'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by State": {
+      "main": [
+        [
+          {
+            "node": "State Item?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Order ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has Order ID?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "State Item?": {
+      "main": [
+        [
+          {
+            "node": "Extract Search Texts1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PlaceOrder Step",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Search Texts1": {
+      "main": [
+        [
+          {
+            "node": "List Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize": {
+      "main": [
+        [
+          {
+            "node": "Normalized is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalized is Valid?": {
+      "main": [
+        [
+          {
+            "node": "Hash and Mask Phone Number",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Malformed Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PlaceOrder Step": {
+      "main": [
+        [
+          {
+            "node": "Done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Done?": {
+      "main": [
+        [
+          {
+            "node": "Get Order ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stuck?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stuck?": {
+      "main": [
+        [
+          {
+            "node": "Clear State2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save State1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Order ID": {
+      "main": [
+        [
+          {
+            "node": "Create Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'SW-Escalate'3 (new order)": {
+      "main": [
+        [
+          {
+            "node": "Call 'SW-Reply'3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Message": {
+      "main": [
+        [
+          {
+            "node": "New Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Contact": {
+      "main": [
+        [
+          {
+            "node": "Extract Data from SW-Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Products1": {
+      "main": [
+        [
+          {
+            "node": "Build Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear State2": {
+      "main": [
+        [
+          {
+            "node": "Call 'SW-Escalate'2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear State3": {
+      "main": [
+        [
+          {
+            "node": "Call 'SW-Escalate'3 (new order)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear State": {
+      "main": [
+        [
+          {
+            "node": "Send Order Cancel Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear State1": {
+      "main": [
+        [
+          {
+            "node": "Escalate Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Conversation State": {
+      "main": [
+        [
+          {
+            "node": "Send Order Status Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert State": {
+      "main": [
+        [
+          {
+            "node": "Call 'SW-Reply'1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert State2": {
+      "main": [
+        [
+          {
+            "node": "Reply Payment Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Low Confidence": {
+      "main": [
+        [
+          {
+            "node": "Escalate Low Confidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Order Miss": {
+      "main": [
+        [
+          {
+            "node": "Upsert State3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Order": {
+      "main": [
+        [
+          {
+            "node": "Clear State3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save State1": {
+      "main": [
+        [
+          {
+            "node": "Call 'SW-Reply'2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load State": {
+      "main": [
+        [
+          {
+            "node": "Interrupt Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Classification": {
+      "main": [
+        [
+          {
+            "node": "Confident?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Products": {
+      "main": [
+        [
+          {
+            "node": "PlaceOrder Step",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Order": {
+      "main": [
+        [
+          {
+            "node": "Order Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert State3": {
+      "main": [
+        [
+          {
+            "node": "Reply Order Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate Human Request": {
+      "main": [
+        [
+          {
+            "node": "Clear State4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "vnHyAj8nrGAWn4Kw",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "saveDataSuccessExecution": "all"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "pinData": {
+    "Business Hours": [
+      {
+        "json": {
+          "threshold": 0.6,
+          "max_strikes": 2,
+          "max_attempts": 3,
+          "sla_minutes": 30,
+          "reminder_every_min": 30,
+          "max_reminders": 3,
+          "state_ttl_min": 30,
+          "retention_days": {
+            "messages": 30,
+            "contacts": 90
+          },
+          "hours": {
+            "days": [
+              "Mon",
+              "Tue",
+              "Wed",
+              "Thu",
+              "Fri",
+              "Sat"
+            ],
+            "open": 8,
+            "close": 20
+          },
+          "max_qty": 10,
+          "zones": [
+            {
+              "label": "Lagos",
+              "match": [
+                "lagos"
+              ],
+              "fee": 3500
+            },
+            {
+              "label": "Abuja",
+              "match": [
+                "abuja"
+              ],
+              "fee": 5500
+            },
+            {
+              "label": "Port Harcourt",
+              "match": [
+                "port harcourt",
+                "ph"
+              ],
+              "fee": 5500
+            }
+          ],
+          "routing": {
+            "new_order": "sales",
+            "payment_verification": "sales",
+            "complaint_refund": "manager",
+            "delivery_issue": "dispatch",
+            "low_confidence": "sales",
+            "human_request": "sales",
+            "media_received": "sales",
+            "intake_stuck": "sales",
+            "unknown": "sales"
+          },
+          "staff": {
+            "sales": {
+              "name": "Amaka",
+              "chat_id": "111"
+            },
+            "dispatch": {
+              "name": "Tunde",
+              "chat_id": "222"
+            },
+            "manager": {
+              "name": "Zuri Manager",
+              "chat_id": "333"
+            }
+          },
+          "intents": {
+            "product_enquiry": {
+              "price": 1,
+              "how much": 1,
+              "cost": 0.8,
+              "available": 0.7,
+              "stock": 0.7,
+              "catalogue": 0.8,
+              "do you have": 0.8
+            },
+            "order_status": {
+              "status": 0.8,
+              "tracking": 1,
+              "track": 0.8,
+              "where is": 0.7,
+              "my order": 0.8
+            },
+            "place_order": {
+              "buy": 1,
+              "purchase": 1,
+              "place an order": 1,
+              "i want to order": 1,
+              "want to get": 0.8,
+              "cart": 0.7
+            },
+            "delivery_info": {
+              "delivery": 1,
+              "shipping": 1,
+              "how long": 0.7,
+              "dispatch": 0.8,
+              "areas": 0.6
+            },
+            "payment_info": {
+              "pay": 0.8,
+              "account": 0.6,
+              "transfer": 0.8,
+              "bank": 0.8,
+              "paid": 0.8,
+              "receipt": 1
+            },
+            "complaint_refund": {
+              "refund": 1,
+              "broken": 1,
+              "shattered": 1,
+              "wrong": 0.6,
+              "complain": 1,
+              "terrible": 0.8
+            }
+          },
+          "messages": {},
+          "after_hours": false
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "Classifier": [
+      {
+        "json": {
+          "threshold": 0.6,
+          "max_strikes": 2,
+          "max_attempts": 3,
+          "sla_minutes": 30,
+          "reminder_every_min": 30,
+          "max_reminders": 3,
+          "state_ttl_min": 30,
+          "retention_days": {
+            "messages": 30,
+            "contacts": 90
+          },
+          "hours": {
+            "days": [
+              "Mon",
+              "Tue",
+              "Wed",
+              "Thu",
+              "Fri",
+              "Sat"
+            ],
+            "open": 8,
+            "close": 20
+          },
+          "max_qty": 10,
+          "zones": [
+            {
+              "label": "Lagos",
+              "match": [
+                "lagos"
+              ],
+              "fee": 3500
+            },
+            {
+              "label": "Abuja",
+              "match": [
+                "abuja"
+              ],
+              "fee": 5500
+            },
+            {
+              "label": "Port Harcourt",
+              "match": [
+                "port harcourt",
+                "ph"
+              ],
+              "fee": 5500
+            }
+          ],
+          "routing": {
+            "new_order": "sales",
+            "payment_verification": "sales",
+            "complaint_refund": "manager",
+            "delivery_issue": "dispatch",
+            "low_confidence": "sales",
+            "human_request": "sales",
+            "media_received": "sales",
+            "intake_stuck": "sales",
+            "unknown": "sales"
+          },
+          "staff": {
+            "sales": {
+              "name": "Amaka",
+              "chat_id": "111"
+            },
+            "dispatch": {
+              "name": "Tunde",
+              "chat_id": "222"
+            },
+            "manager": {
+              "name": "Zuri Manager",
+              "chat_id": "333"
+            }
+          },
+          "intents": {
+            "product_enquiry": {
+              "price": 1,
+              "how much": 1,
+              "cost": 0.8,
+              "available": 0.7,
+              "stock": 0.7,
+              "catalogue": 0.8,
+              "do you have": 0.8
+            },
+            "order_status": {
+              "status": 0.8,
+              "tracking": 1,
+              "track": 0.8,
+              "where is": 0.7,
+              "my order": 0.8
+            },
+            "place_order": {
+              "buy": 1,
+              "purchase": 1,
+              "place an order": 1,
+              "i want to order": 1,
+              "want to get": 0.8,
+              "cart": 0.7
+            },
+            "delivery_info": {
+              "delivery": 1,
+              "shipping": 1,
+              "how long": 0.7,
+              "dispatch": 0.8,
+              "areas": 0.6
+            },
+            "payment_info": {
+              "pay": 0.8,
+              "account": 0.6,
+              "transfer": 0.8,
+              "bank": 0.8,
+              "paid": 0.8,
+              "receipt": 1
+            },
+            "complaint_refund": {
+              "refund": 1,
+              "broken": 1,
+              "shattered": 1,
+              "wrong": 0.6,
+              "complain": 1,
+              "terrible": 0.8
+            }
+          },
+          "messages": {},
+          "after_hours": false,
+          "override": null,
+          "override_reason": null,
+          "has_state": false,
+          "state_step": null,
+          "state_intent": null,
+          "intent": "unknown",
+          "confidence": 0,
+          "runner_up": null
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "versionId": "8cc2dcad-2bde-4804-be6c-b4f5ba4193fa",
+  "activeVersionId": "8cc2dcad-2bde-4804-be6c-b4f5ba4193fa",
+  "versionCounter": 1702,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-11T17:26:58.342Z",
+      "createdAt": "2026-10-11T17:26:58.342Z",
+      "role": "workflow:owner",
+      "workflowId": "a4Tfajsf1EzW8xuy",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version 8cc2dcad",
+    "description": ""
+  }
+}

@@ -1,0 +1,262 @@
+{
+  "updatedAt": "2026-10-12T09:07:34.618Z",
+  "createdAt": "2026-10-12T08:33:08.506Z",
+  "id": "RvzI7elwhu2Lvdfu",
+  "name": "Test-Helpers",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0a783629-7ea6-49d2-b1b9-546e3898e6e2",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, created_at, status, left(text, 120) AS reply FROM outbox ORDER BY id DESC LIMIT 10;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "c841d4be-17aa-4827-91b7-692b154de340",
+      "name": "Show All Replies",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT intent, step, attempts, expires_at FROM conversation_state;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        0
+      ],
+      "id": "a1e84d3c-af4d-4f7c-b120-316e368e268d",
+      "name": "Show Conversation State",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, category, priority, assigned_to, status, notify_status, reminder_count, created_at, sla_due_at FROM escalations ORDER BY id DESC LIMIT 10;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        0
+      ],
+      "id": "5ec8a0a1-1cfb-4188-9d9f-65d7a8e94b02",
+      "name": "Show Escalations",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ts, request_id, event, detail FROM audit_log ORDER BY id DESC LIMIT 20;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        0
+      ],
+      "id": "5f58bc57-569c-4c54-9d65-8d7b2cd42cc2",
+      "name": "Show Audit Logs",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT order_id, status, total_ngn, delivery_zone, customer_name FROM orders ORDER BY created_at DESC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "c24b6697-80bc-4ac0-9737-4b137b2dd89b",
+      "name": "Show Orders",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE escalations SET sla_due_at = now() - interval '1 hour' WHERE id = (SELECT id FROM escalations WHERE status = 'open' ORDER BY id LIMIT 1) RETURNING id, category, sla_due_at;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1344,
+        0
+      ],
+      "id": "a05f0ebd-b0cc-470d-9df5-c508fc5a3f02",
+      "name": "Make Oldest Open case Overdue",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Show All Replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show All Replies": {
+      "main": [
+        [
+          {
+            "node": "Show Conversation State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show Conversation State": {
+      "main": [
+        [
+          {
+            "node": "Show Escalations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show Escalations": {
+      "main": [
+        [
+          {
+            "node": "Show Audit Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show Audit Logs": {
+      "main": [
+        [
+          {
+            "node": "Show Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show Orders": {
+      "main": [
+        [
+          {
+            "node": "Make Oldest Open case Overdue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "9f020f72-26f0-4de0-831f-c76b21fab669",
+  "activeVersionId": null,
+  "versionCounter": 43,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-12T08:33:08.506Z",
+      "createdAt": "2026-10-12T08:33:08.506Z",
+      "role": "workflow:owner",
+      "workflowId": "RvzI7elwhu2Lvdfu",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": null,
+    "description": null
+  }
+}

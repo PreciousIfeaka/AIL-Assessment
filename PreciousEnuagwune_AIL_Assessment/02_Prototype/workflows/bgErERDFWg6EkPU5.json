@@ -1,0 +1,587 @@
+{
+  "updatedAt": "2026-10-12T09:00:04.184Z",
+  "createdAt": "2026-10-09T13:07:51.958Z",
+  "id": "bgErERDFWg6EkPU5",
+  "name": "SW-Escalate",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "category"
+            },
+            {
+              "name": "reason"
+            },
+            {
+              "name": "priority"
+            },
+            {
+              "name": "phone_hash"
+            },
+            {
+              "name": "phone_masked"
+            },
+            {
+              "name": "request_id"
+            },
+            {
+              "name": "after_hours",
+              "type": "boolean"
+            },
+            {
+              "name": "context"
+            },
+            {
+              "name": "send_ack",
+              "type": "boolean"
+            },
+            {
+              "name": "wa_phone"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        64
+      ],
+      "id": "88dd664a-df47-45b3-bae5-a4f9efdc94a1",
+      "name": "When Executed by Another Workflow",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "nUPcILrfAEC0tDHN",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/nUPcILrfAEC0tDHN"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        224,
+        64
+      ],
+      "id": "c4a8eb43-95ce-4912-9e21-593356b17549",
+      "name": "Call 'SW-Config'",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const trigger = $('When Executed by Another Workflow').first().json;\nconst cfg = $('Call \\'SW-Config\\'').first().json\n\n// Map the category to a staff role, defaulting to sales if unmapped\nconst assigned_to = cfg.routing[$('When Executed by Another Workflow').first().json.category] || 'sales';\n\nlet targetTime = new Date();\n\n// Helper to check if a specific time is within configured business hours\nfunction isOpen(dateObj) {\n  const parts = new Intl.DateTimeFormat('en-GB', { \n    timeZone: 'Africa/Lagos', \n    weekday: 'short', \n    hour: '2-digit', \n    hour12: false \n  }).formatToParts(dateObj);\n  \n  const get = t => parts.find(x => x.type === t).value;\n  const hour = Number(get('hour')) % 24;\n  \n  return cfg.hours.days.includes(get('weekday')) && \n         hour >= cfg.hours.open && \n         hour < cfg.hours.close;\n}\n\n// If after hours, loop forward in 30-minute steps until the business opens\nwhile (!isOpen(targetTime)) {\n  targetTime.setMinutes(targetTime.getMinutes() + 30);\n}\n\n// Add the SLA minutes to the open time\ntargetTime.setMinutes(targetTime.getMinutes() + cfg.sla_minutes);\n\nreturn {\n  json: {\n    ...trigger,\n    assigned_to,\n    sla_due_at: targetTime.toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        64
+      ],
+      "id": "f680336b-f3ac-49ac-8b87-debda378c8ab",
+      "name": "Pick Assignee and SLA"
+    },
+    {
+      "parameters": {
+        "jsCode": "const trigger = $('When Executed by Another Workflow').first().json;\nconst esc = $('Insert Escalation').first().json;\nconst assigneeData = $('Pick Assignee and SLA').first().json;\n\n// Grab all messages from the Get Context node and format them\nconst messages = $('Get Context').all().map(item => item.json);\nconst chatHistory = messages.length > 0 \n  ? messages.reverse().map(m => `- ${m.text || '[' + m.msg_type + ']'}`).join('\\n')\n  : 'No previous messages.';\n  \n// Build the Telegram/Email text\nconst alertText = `🚨 *New Ticket: #${esc.id}*\n*Category:* ${trigger.category}\n*Priority:* ${trigger.priority}\n*Customer:* ${trigger.phone_masked}\n*Reason:* ${trigger.reason}\n*SLA Due:* ${new Date(assigneeData.sla_due_at).toLocaleString('en-GB', { timeZone: 'Africa/Lagos' })}\n\n*Recent Context:*\n${chatHistory}\n\n*Collected Data:*\n${trigger.context || 'None'}`;\n\nreturn [{\n  json: {\n    alert_text: alertText,\n    assigned_to: assigneeData.assigned_to,\n    ticket_id: esc.id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        64
+      ],
+      "id": "8ef2895d-089b-4ce5-b61a-a382e76a8d74",
+      "name": "Build Alert"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Call \\'SW-Config\\'').item.json.staff[$('Build Alert').item.json.assigned_to].chat_id }}",
+        "text": "={{ $('Build Alert').item.json.alert_text }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1344,
+        64
+      ],
+      "id": "fa5fa45c-930e-4473-8f70-9fdf7804720b",
+      "name": "Send Escalation Notification",
+      "webhookId": "a1ee17ab-5982-40fb-8a23-c4a11399e993",
+      "retryOnFail": true,
+      "credentials": {
+        "telegramApi": {
+          "id": "TNnlptKyEYTurFXE",
+          "name": "Telegram account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8d129810-7002-4785-b03f-b093a97474a5",
+              "leftValue": "={{ $('When Executed by Another Workflow').item.json.send_ack }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2016,
+        64
+      ],
+      "id": "3cdf2a85-0b41-4ab3-b9fd-c82662287fc6",
+      "name": "Check Send Ack Flag"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "SIsWDKWUXRdWMnjs",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/SIsWDKWUXRdWMnjs",
+          "cachedResultName": "SW-Reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone_hash": "={{ $('When Executed by Another Workflow').item.json.phone_hash }}",
+            "wa_phone": "={{ $('When Executed by Another Workflow').item.json.wa_phone }}",
+            "request_id": "={{ $('When Executed by Another Workflow').item.json.request_id }}",
+            "text": "={{ $('When Executed by Another Workflow').item.json.after_hours ? 'Our team is currently away, but someone will respond from 8am.' : 'A team member will review this and respond within 30 minutes.' }}",
+            "handled_by": "=bot",
+            "phone_masked": "={{ $('When Executed by Another Workflow').item.json.phone_masked }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "phone_hash",
+              "displayName": "phone_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "wa_phone",
+              "displayName": "wa_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "request_id",
+              "displayName": "request_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "handled_by",
+              "displayName": "handled_by",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "phone_masked",
+              "displayName": "phone_masked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        2240,
+        64
+      ],
+      "id": "7b853b17-1058-40f6-9a90-8281bb5d8394",
+      "name": "Send Escalation Ack Reply"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO escalations (message_id, phone_hash, category, reason, priority, assigned_to, sla_due_at, context_json)\nVALUES (\n  (SELECT id FROM messages WHERE wa_message_id = '{{ String($json.request_id).replace(/'/g, \"''\") }}'),\n  '{{ $json.phone_hash }}',\n  '{{ String($json.category).replace(/'/g, \"''\") }}',\n  '{{ String($json.reason ?? \"\").replace(/\\0/g, \"\").replace(/'/g, \"''\") }}',\n  '{{ $json.priority }}',\n  '{{ $json.assigned_to }}',\n  now() + interval '{{ Number($('Call \\'SW-Config\\'').first().json.sla_minutes) }} minutes',\n  '{{ String($json.context ?? \"{}\").replace(/\\0/g, \"\").replace(/'/g, \"''\") }}'\n)\nRETURNING id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        64
+      ],
+      "id": "09ead2e5-3c64-40bc-95d5-1ad371a82c2a",
+      "name": "Insert Escalation",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT text, intent, received_at\nFROM messages\nWHERE phone_hash = '{{ $('Pick Assignee and SLA').item.json.phone_hash }}'\nORDER BY id DESC\nLIMIT 3;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        64
+      ],
+      "id": "46a7594e-3625-4ecd-a5f3-1adf002b66e7",
+      "name": "Get Context",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE escalations SET notify_status = 'sent'\nWHERE id = {{ Number($('Insert Escalation').item.json.id) }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1792,
+        -32
+      ],
+      "id": "0da05415-3ab4-43be-b2c1-f7715eaa84a4",
+      "name": "Mark Notify Sent",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE escalations SET notify_status = 'failed'\nWHERE id = {{ Number($('Insert Escalation').item.json.id) }};",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1568,
+        160
+      ],
+      "id": "0b814720-bb61-45b6-b3bc-cdbe305ebbba",
+      "name": "Mark Notify Failed",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, phone_masked, event, detail)\nVALUES (\n  '{{ String($('Pick Assignee and SLA').item.json.request_id).replace(/'/g, \"''\") }}',\n  '{{ $('Pick Assignee and SLA').item.json.phone_masked }}',\n  'notify_failed',          -- use 'escalation_created' in the other copy\n  'escalation={{ $('Insert Escalation').item.json.id }}; category={{ String($('Pick Assignee and SLA').item.json.category).replace(/'/g, \"''\") }}; assigned_to={{ $('Pick Assignee and SLA').item.json.assigned_to }}; channel=telegram'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1792,
+        160
+      ],
+      "id": "9e80960f-27c5-49dc-83b9-81696f198be6",
+      "name": "Audit Notify Failed",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO audit_log (request_id, phone_masked, event, detail)\nVALUES (\n  '{{ String($('Pick Assignee and SLA').item.json.request_id).replace(/'/g, \"''\") }}',\n  '{{ $('Pick Assignee and SLA').item.json.phone_masked }}',\n  'notify_failed',          -- use 'escalation_created' in the other copy\n  'escalation={{ $('Insert Escalation').item.json.id }}; category={{ String($('Pick Assignee and SLA').item.json.category).replace(/'/g, \"''\") }}; assigned_to={{ $('Pick Assignee and SLA').item.json.assigned_to }}; channel=telegram'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2464,
+        64
+      ],
+      "id": "6df6fb6f-61b3-4e24-9af1-04b97fde0167",
+      "name": "Escalation Created",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Call 'SW-Config'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'SW-Config'": {
+      "main": [
+        [
+          {
+            "node": "Pick Assignee and SLA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Assignee and SLA": {
+      "main": [
+        [
+          {
+            "node": "Insert Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Escalation Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Escalation Notification": {
+      "main": [
+        [
+          {
+            "node": "Mark Notify Sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Notify Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Send Ack Flag": {
+      "main": [
+        [
+          {
+            "node": "Send Escalation Ack Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Escalation Ack Reply": {
+      "main": [
+        [
+          {
+            "node": "Escalation Created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Escalation": {
+      "main": [
+        [
+          {
+            "node": "Get Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Context": {
+      "main": [
+        [
+          {
+            "node": "Build Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Notify Sent": {
+      "main": [
+        [
+          {
+            "node": "Check Send Ack Flag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Notify Failed": {
+      "main": [
+        [
+          {
+            "node": "Audit Notify Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Audit Notify Failed": {
+      "main": [
+        [
+          {
+            "node": "Check Send Ack Flag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "vnHyAj8nrGAWn4Kw",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "ae49ee47-2758-4e37-8245-ff24b8057a42",
+  "activeVersionId": "ae49ee47-2758-4e37-8245-ff24b8057a42",
+  "versionCounter": 406,
+  "triggerCount": 0,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-11T17:26:58.342Z",
+      "createdAt": "2026-10-11T17:26:58.342Z",
+      "role": "workflow:owner",
+      "workflowId": "bgErERDFWg6EkPU5",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version ae49ee47",
+    "description": ""
+  }
+}

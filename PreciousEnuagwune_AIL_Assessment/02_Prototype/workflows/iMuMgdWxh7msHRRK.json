@@ -1,0 +1,475 @@
+{
+  "updatedAt": "2026-10-12T15:36:16.730Z",
+  "createdAt": "2026-10-10T17:11:30.948Z",
+  "id": "iMuMgdWxh7msHRRK",
+  "name": "Dashboard",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "path": "c66cb811-f7e3-4497-a601-225884ff14fa/dashboard",
+        "authentication": "basicAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "38c184c2-9667-42c3-b678-f4bc1407a1b4",
+      "name": "Receive",
+      "webhookId": "c66cb811-f7e3-4497-a601-225884ff14fa",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "RokN1OZrVJ6n84WL",
+          "name": "Unnamed credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Volume By Intent, 7 Days",
+        "height": 208,
+        "width": 176
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        176,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "12505bf9-25de-4e1b-b447-c829f6c559bc",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Escalation Rate, 7 Days",
+        "height": 208,
+        "width": 176
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        400,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "8ca93680-1737-44fe-af57-21ac535a7f1b",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "Unresolved changes with age",
+        "height": 208,
+        "width": 176
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        608,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "7b4fe33f-5ca1-4ce8-ab21-4b6ca2acfaeb",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "Human first response (minutes)",
+        "height": 208,
+        "width": 176
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        848,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "8db247d0-2b61-48d2-8c86-57f880d30472",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "Bot Response (Seconds)",
+        "height": 208,
+        "width": 176
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1072,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "0604a6c5-d330-4b16-974f-a530a65e8397",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "Failure Counters (7 Days)\n",
+        "height": 208,
+        "width": 176
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1280,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "fe207f80-b7fe-406f-aae7-4746c3d09c90",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "content": "SLA Breaches\n",
+        "height": 208,
+        "width": 176
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1488,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "d4e3f5fc-b9b1-4d83-9175-2121ad2a8890",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = name => $(name).all().map(i => i.json);\nconst esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');\nconst num = v => (v === null || v === undefined || v === '') ? null : Number(v);\nconst wat = iso => iso ? new Date(iso).toLocaleString('en-GB', { timeZone: 'Africa/Lagos', hour12: false }) : '-';\nconst mins = m => m === null ? '-' : (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);\n\nconst q1 = rows('Q1').filter(r => r.intent);\nconst escRate = num(rows('Q2')[0]?.pct);\nconst q3 = rows('Q3').filter(r => r.id !== undefined && r.id !== null);\nconst humanMin = num(rows('Q4')[0]?.human_first_response_min);\nconst botSec = num(rows('Q5')[0]?.bot_response_sec);\nconst q6 = rows('Q6').filter(r => r.event);\nconst breaches = num(rows('Q7')[0]?.breaches) ?? 0;\n\nconst total = q1.reduce((s, r) => s + Number(r.n), 0);\nconst maxN = Math.max(1, ...q1.map(r => Number(r.n)));\nconst botResolved = escRate === null ? null : +(100 - escRate).toFixed(1);\n\nconst failEvents = ['duplicate_ignored','low_confidence','notify_failed','send_failed',\n                    'signature_invalid','malformed_payload','workflow_error'];\nconst failMap = Object.fromEntries(q6.map(r => [r.event, Number(r.n)]));\n\nconst card = (label, value, sub = '') =>\n  `<div class=\"card\"><div class=\"label\">${esc(label)}</div><div class=\"value\">${esc(value)}</div><div class=\"sub\">${esc(sub)}</div></div>`;\n\nconst bars = q1.length\n  ? q1.map(r => `<div class=\"barrow\"><span class=\"bl\">${esc(r.intent)}</span>\n      <span class=\"bar\"><span style=\"width:${Math.round(Number(r.n) / maxN * 100)}%\"></span></span>\n      <span class=\"bn\">${esc(r.n)}</span></div>`).join('')\n  : '<p class=\"muted\">No messages in the last 7 days.</p>';\n\nconst caseRows = q3.length\n  ? q3.map(r => {\n      const late = r.status === 'open' && new Date(r.sla_due_at) < new Date();\n      return `<tr class=\"${late ? 'late' : ''}\"><td>#${esc(r.id)}</td><td>${esc(r.category)}</td>\n        <td>${esc(r.assigned_to)}</td><td>${esc(r.status)}</td><td>${esc(r.notify_status)}</td>\n        <td>${mins(Number(r.age_min))}</td><td>${wat(r.sla_due_at)}</td></tr>`;\n    }).join('')\n  : '<tr><td colspan=\"7\" class=\"muted\">No unresolved cases.</td></tr>';\n\nconst failRows = failEvents.map(e =>\n  `<tr class=\"${failMap[e] ? 'late' : ''}\"><td>${esc(e)}</td><td>${failMap[e] || 0}</td></tr>`).join('');\n\nconst html = `<!doctype html>\n<html lang=\"en\"><head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta http-equiv=\"refresh\" content=\"60\">\n<title>Zuri Operations Dashboard</title>\n<style>\n:root { --bg:#f6f7f9; --card:#fff; --text:#1c1f24; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --bad:#fee2e2; }\n@media (prefers-color-scheme: dark) { :root { --bg:#111418; --card:#1a1f26; --text:#e8eaed; --muted:#9aa3af; --line:#2a313b; --accent:#60a5fa; --bad:#4a1d1d; } }\nbody { margin:0; padding:16px; font-family:system-ui,Arial,sans-serif; background:var(--bg); color:var(--text); }\nh1 { font-size:20px; margin:0 0 4px; } h2 { font-size:15px; margin:24px 0 8px; }\n.muted { color:var(--muted); font-size:13px; }\n.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-top:12px; }\n.card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }\n.label { font-size:12px; color:var(--muted); } .value { font-size:24px; font-weight:600; margin-top:4px; } .sub { font-size:11px; color:var(--muted); }\n.panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; overflow-x:auto; }\n.barrow { display:flex; align-items:center; gap:8px; margin:6px 0; font-size:13px; }\n.bl { width:140px; } .bn { width:40px; text-align:right; }\n.bar { flex:1; background:var(--line); border-radius:4px; height:12px; } .bar span { display:block; height:12px; background:var(--accent); border-radius:4px; }\ntable { border-collapse:collapse; width:100%; font-size:13px; } th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }\ntr.late td { background:var(--bad); }\n</style></head><body>\n<h1>Zuri Home &amp; Style: Operations</h1>\n<div class=\"muted\">Last 7 days. Updated ${wat(new Date().toISOString())} WAT. Refreshes every 60 seconds.</div>\n<div class=\"grid\">\n${card('Messages', total)}\n${card('Handled by bot', botResolved === null ? 'n/a' : botResolved + '%', 'bot-resolved share')}\n${card('Escalation rate', escRate === null ? 'n/a' : escRate + '%')}\n${card('Unresolved cases', q3.length)}\n${card('SLA breaches', breaches, 'open and overdue')}\n${card('Bot response', botSec === null ? 'n/a' : botSec + 's', 'average')}\n${card('Human first response', humanMin === null ? 'n/a' : humanMin + ' min', 'average')}\n</div>\n<h2>Volume by intent</h2><div class=\"panel\">${bars}</div>\n<h2>Unresolved cases</h2><div class=\"panel\"><table>\n<tr><th>Case</th><th>Category</th><th>Assigned</th><th>Status</th><th>Notified</th><th>Age</th><th>SLA due (WAT)</th></tr>${caseRows}</table></div>\n<h2>Failures and fallbacks</h2><div class=\"panel\"><table><tr><th>Event</th><th>Count</th></tr>${failRows}</table></div>\n</body></html>`;\n\nreturn [{ json: { html } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        0
+      ],
+      "id": "6403d715-10c1-45cd-b189-1402897deb92",
+      "name": "Build HTML"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1920,
+        0
+      ],
+      "id": "a857e3e3-b8df-4408-a0c1-99251fcb1e41",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(intent, 'unclassified') AS intent, COUNT(*)::int AS n\nFROM messages\nWHERE received_at >= now() - interval '7 days'\nGROUP BY 1 ORDER BY n DESC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "4c4c2fe9-2b95-426a-af30-c6503674688c",
+      "name": "Q1",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ROUND(100.0 *\n  (SELECT COUNT(*) FROM escalations WHERE created_at >= now() - interval '7 days')\n  / NULLIF((SELECT COUNT(*) FROM messages WHERE received_at >= now() - interval '7 days'), 0), 1) AS pct;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        0
+      ],
+      "id": "1eb074b6-6785-4ee2-a165-5a395770c2a8",
+      "name": "Q2",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, category, assigned_to, status, notify_status, created_at, sla_due_at,\n       (EXTRACT(EPOCH FROM (now() - created_at)) / 60)::int AS age_min\nFROM escalations\nWHERE status IN ('open','claimed')\nORDER BY created_at LIMIT 50;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        640,
+        0
+      ],
+      "id": "2c14fe13-0ba8-4b70-8c07-03ba50a8e96c",
+      "name": "Q3",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ROUND(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at)) / 60)::numeric, 1) AS human_first_response_min\nFROM escalations\nWHERE first_response_at IS NOT NULL AND created_at >= now() - interval '7 days';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        880,
+        16
+      ],
+      "id": "9720b09d-045b-424c-a527-f99f3a0b1975",
+      "name": "Q4",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ROUND(AVG(EXTRACT(EPOCH FROM (responded_at - received_at)))::numeric, 1) AS bot_response_sec\nFROM messages\nWHERE handled_by = 'bot' AND responded_at IS NOT NULL AND received_at >= now() - interval '7 days';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1104,
+        16
+      ],
+      "id": "1e21ae14-a971-4a85-b6fe-df14597634e6",
+      "name": "Q5",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT event, COUNT(*)::int AS n\nFROM audit_log\nWHERE event IN ('duplicate_ignored','low_confidence','notify_failed','send_failed',\n                'signature_invalid','malformed_payload','workflow_error')\n  AND ts >= now() - interval '7 days'\nGROUP BY event;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1328,
+        16
+      ],
+      "id": "ace55344-5e6c-44c4-9c00-984eeba12d9e",
+      "name": "Q6",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*)::int AS breaches FROM escalations WHERE status = 'open' AND sla_due_at < now();",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1552,
+        16
+      ],
+      "id": "4f2c12c5-8d19-4632-a310-fe4bb6c14906",
+      "name": "Q7",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "HX90ICbuZ88iUFj2",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Receive": {
+      "main": [
+        [
+          {
+            "node": "Q1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Q1": {
+      "main": [
+        [
+          {
+            "node": "Q2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Q2": {
+      "main": [
+        [
+          {
+            "node": "Q3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Q3": {
+      "main": [
+        [
+          {
+            "node": "Q4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Q4": {
+      "main": [
+        [
+          {
+            "node": "Q5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Q5": {
+      "main": [
+        [
+          {
+            "node": "Q6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Q6": {
+      "main": [
+        [
+          {
+            "node": "Q7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Q7": {
+      "main": [
+        [
+          {
+            "node": "Build HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "vnHyAj8nrGAWn4Kw",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "pinData": {},
+  "versionId": "1e4c0bb3-c48b-4a10-b8ca-a197e644e8fe",
+  "activeVersionId": "1e4c0bb3-c48b-4a10-b8ca-a197e644e8fe",
+  "versionCounter": 153,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "shared": [
+    {
+      "updatedAt": "2026-10-11T17:26:58.342Z",
+      "createdAt": "2026-10-11T17:26:58.342Z",
+      "role": "workflow:owner",
+      "workflowId": "iMuMgdWxh7msHRRK",
+      "projectId": "fc9jD2nR23oW6pls",
+      "project": {
+        "updatedAt": "2026-10-11T17:33:46.366Z",
+        "createdAt": "2026-10-11T16:58:06.904Z",
+        "id": "fc9jD2nR23oW6pls",
+        "name": "Precious Enuagwune <preciousifeaka@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "fcbdfd00-adbf-4bac-aef2-a9b0e1bb2ef3"
+      }
+    }
+  ],
+  "versionMetadata": {
+    "name": "Version 1e4c0bb3",
+    "description": ""
+  }
+}
